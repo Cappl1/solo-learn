@@ -34,6 +34,8 @@ from torchvision.datasets import STL10, ImageFolder
 from solo.data.custom.ego4d import Ego4d
 from solo.data.custom.imagenet import ImgnetDataset
 from solo.data.custom.tinyimgnet import TinyDataset
+from solo.data.custom.core50 import Core50
+from solo.data.custom.temporal_core50 import TemporalCore50
 
 try:
     from solo.data.h5_dataset import H5Dataset
@@ -224,6 +226,7 @@ def build_transform_pipeline(dataset, cfg):
         "imagenet2_100": (IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
         "imagenet2": (IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
         "ego4d": (IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
+        "core50": (IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
     }
 
     mean, std = MEANS_N_STD.get(
@@ -352,6 +355,12 @@ def prepare_datasets(
         )
     elif dataset in ["ego4d"]:
         train_dataset = dataset_with_index(Ego4d)(train_data_path, transform, **dataset_kwargs)
+    elif dataset == "core50":
+        train_dataset = dataset_with_index(Core50)(train_data_path, transform=transform, **dataset_kwargs)
+    elif dataset == "temporal_core50":
+        train_dataset = dataset_with_index(TemporalCore50)(
+            train_data_path, transform=transform, **dataset_kwargs
+        )
     elif dataset == "tiny":
         train_dataset = dataset_with_index(TinyDataset)(train_data_path,split="train", transform=transform)
     elif dataset in ["imagenet2", "imagenet2_100"]:

@@ -297,6 +297,7 @@ def prepare_transforms(dataset: str) -> Tuple[nn.Module, nn.Module]:
         "tiny": tiny_pipeline,
         'core50': core50_pipeline,
         'core50_bg': core50_pipeline,
+        'temporal_core50': imagenet_pipeline, #verify please
         "custom": custom_pipeline,
         'DTD': imagenet_pipeline,
         'Flowers102': imagenet_pipeline,
@@ -357,7 +358,8 @@ def prepare_datasets(
     Returns:
         Tuple[Dataset, Dataset]: training dataset and validation dataset.
     """
-
+    
+    
     if train_data_path is None:
         sandbox_folder = Path(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
         train_data_path = sandbox_folder / "datasets"
@@ -368,7 +370,7 @@ def prepare_datasets(
 
     assert dataset in [
         "cifar10", "cifar100", "stl10", "imagenet", "imagenet100", "custom", "imagenet2", "imagenet2_100", "ego4d",
-        "tiny", "cifar10_224", "cifar100_224", "imagenet_42", "imagenet100_42", 'core50', "DTD", 'Flowers102',
+        "tiny", "cifar10_224", "cifar100_224", "imagenet_42", "imagenet100_42", 'core50','temporal_core50', "DTD", 'Flowers102',
         'FGVCAircraft', 'Food101', 'OxfordIIITPet', 'Places365', 'StanfordCars', "STL10","STL10_224", "Places365_h5", "SUN397",
         "Caltech101", "imagenet1pct_42", "imagenet10pct_42", "toybox", 'core50_bg', "feat", "COIL100", "STL10_FG_224",
         "STL10_FG"
@@ -468,13 +470,12 @@ def prepare_datasets(
         else:
             train_dataset = ImageFolder(train_data_path, T_train)
             val_dataset = ImageFolder(val_data_path, T_val)
-    elif dataset == 'core50':
-        assert 'train_backgrounds' in dataset_kwargs.keys()
-        assert 'val_backgrounds' in dataset_kwargs.keys()
-        train_dataset = Core50(h5_path=Path(train_data_path) / 'core50_350x350/core50_arr.h5', transform=T_train,
-                               backgrounds=dataset_kwargs['train_backgrounds'])
-        val_dataset = Core50(h5_path=Path(val_data_path) / 'core50_350x350/core50_arr.h5', transform=T_val,
-                             backgrounds=dataset_kwargs['val_backgrounds'])
+    elif dataset == "core50" or "temporal_core50":
+        
+        train_dataset = Core50(h5_path=train_data_path, transform=T_train,
+                            backgrounds=dataset_kwargs.get("train_backgrounds", None))
+        val_dataset = Core50(h5_path=val_data_path, transform=T_val,
+                          backgrounds=dataset_kwargs.get("val_backgrounds", None))
     elif dataset == 'core50_bg':
         train_dataset = Core50ForBGClassification(h5_path=Path(train_data_path) / 'core50_350x350/core50_arr.h5',
                                                   split="train", transform=T_train)
@@ -587,7 +588,7 @@ def prepare_data(
             mean=IMAGENET_DEFAULT_MEAN,
             std=IMAGENET_DEFAULT_STD,
         )
-
+  
     train_dataset, val_dataset = prepare_datasets(
         dataset,
         T_train,

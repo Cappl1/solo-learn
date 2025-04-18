@@ -1,0 +1,5 @@
+enabled: True
+entity: None
+project: "solo-learn-core50"
+group: "mocov3-temporal"
+job_type: "train"

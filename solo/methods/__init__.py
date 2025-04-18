@@ -38,7 +38,7 @@ from solo.methods.vibcreg import VIbCReg
 from solo.methods.vicreg import VICReg
 from solo.methods.wmse import WMSE
 from solo.methods.all4one import All4One
-
+from solo.methods.curriculum_mocov3 import CurriculumMoCoV3
 
 METHODS = {
     # base classes
@@ -52,6 +52,7 @@ METHODS = {
     "mae": MAE,
     "mocov2plus": MoCoV2Plus,
     "mocov3": MoCoV3,
+    "curriculum_mocov3": CurriculumMoCoV3,
     "nnbyol": NNBYOL,
     "nnclr": NNCLR,
     "nnsiam": NNSiam,

@@ -124,6 +124,7 @@ def main(cfg: DictConfig):
         val_data_format = "image_folder"
     else:
         val_data_format = cfg.data.format
+        
 
     train_loader, val_loader = prepare_data(
         cfg.data.dataset,

@@ -31,6 +31,8 @@ _N_CLASSES_PER_DATASET = {
     "imagenet2_100": 100,
     "tiny": 200,
     "ego4d": 0,
+    "core50": 50,
+    "temporal_core50": 50,
 }
 
 _SUPPORTED_DATASETS = [
@@ -43,7 +45,9 @@ _SUPPORTED_DATASETS = [
     "imagenet2",
     "imagenet2_100",
     "tiny",
-    "ego4d"
+    "ego4d",
+    "core50",
+    "temporal_core50"
 ]
 
 

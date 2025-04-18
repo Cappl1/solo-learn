@@ -38,6 +38,7 @@ zoo/*.png
 zoo/*.jpg
 zoo/*.jpeg
 
+trained_models/
 saved_models/
 model_storage*/
 lightning_logs/

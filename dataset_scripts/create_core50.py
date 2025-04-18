@@ -5,12 +5,13 @@ import numpy as np
 from tqdm import tqdm
 
 if __name__ == '__main__':
-    dir = Path("/pfss/mlde/workspaces/mlde_wsp_PI_Roig/shared/datasets/core50_350x350")
+    dir = Path("/home/data/core50/core50_350x350")
+    dir2 = Path("/home/brothen")
     corr = [Path('/s3/o43/C_03_43_209.png')]
 
     total = len(list(filter(lambda x: not x.stem.startswith("."), dir.rglob("*.png"))))
 
-    with h5py.File(dir / "core50_arr.h5", "w") as h5_file, tqdm(total=total) as bar:
+    with h5py.File(dir2 / "core50_arr.h5", "w") as h5_file, tqdm(total=total) as bar:
         for bg_p in filter(lambda x: x.is_dir() and not x.stem.startswith("."), dir.iterdir()):
             bg_group = h5_file.create_group(bg_p.stem)
 
