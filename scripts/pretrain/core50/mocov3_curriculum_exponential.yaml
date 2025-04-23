@@ -11,7 +11,7 @@ hydra:
   run:
     dir: .
 
-name: "mocov3-curriculum-mae-binary-core50"
+name: "mocov3-curriculum-mae-exponential-core50"
 method: "curriculum_mocov3"  # Use our new curriculum method
 backbone:
   name: "resnet18"
@@ -23,8 +23,7 @@ method_kwargs:
   
   # Curriculum learning parameters
   curriculum_type: "mae"
-  curriculum_reverse: False
-  curriculum_strategy: "binary"  # Use binary thresholding
+  curriculum_strategy: "exponential"  # Use exponential weighting
   curriculum_warmup_epochs: 10
   curriculum_weight: 1.0
   reconstruction_masking_ratio: 0.75
@@ -51,7 +50,8 @@ optimizer:
   no_labels: False  # Core50 has labels
 scheduler:
   name: "warmup_cosine"
-  warmup_epochs: 1
+  warmup_epochs: 0.01
+  max_epochs: 100          
 checkpoint:
   enabled: True
   dir: "trained_models"
@@ -59,7 +59,7 @@ checkpoint:
   keep_prev: True
   every_n_iter: 50000
 auto_resume:
-  enabled: True
+  enabled: False
 knn_clb:
   enabled: False  # Set to True if you want to use KNN evaluation during training
   dataset: "core50"  # Required even if disabled

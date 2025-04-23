@@ -10,10 +10,10 @@ hydra:
   run:
     dir: .
 
-name: "mocov3-core50-linear-eval"
+name: "jepa_binary"
 backbone:
   name: "resnet18"
-pretrained_feature_extractor: "trained_models/mocov3/ul71xpdw/mocov3-temporal-core50-ul71xpdw-ep=last-stp=last.ckpt"  # Update this path to your actual checkpoint
+pretrained_feature_extractor: "trained_models/curriculum_mocov3/jepa_binary/mocov3-curriculum-jepa-binary-core50-rriw6y2s-ep=10-stp=0.ckpt"  # Update this path to your actual checkpoint
 data:
   dataset: "core50"
   train_path: "/home/brothen/core50_arr.h5"

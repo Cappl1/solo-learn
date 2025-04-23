@@ -7,33 +7,6 @@ import torch.nn.functional as F
 from solo.losses.mocov3 import mocov3_loss_func
 from solo.methods.mocov3 import MoCoV3
 from solo.utils.misc import gather
-from solo.utils.lars import LARS  # Import LARS directly from solo-learn
-
-
-class SelectiveGradientFunction(torch.autograd.Function):
-    """Custom autograd function that selectively scales gradients based on sample weights."""
-    
-    @staticmethod
-    def forward(ctx, inputs, weights):
-        ctx.save_for_backward(weights)
-        return inputs.clone()  # Clone to ensure we don't modify the original tensor
-    
-    @staticmethod
-    def backward(ctx, grad_output):
-        weights, = ctx.saved_tensors
-        # Scale the gradients by weights
-        # Expand weights to match grad_output shape if needed
-        if weights.dim() == 1 and grad_output.dim() > 1:
-            # For batch-wise weights
-            scaled_grads = grad_output * weights.view(-1, *([1] * (grad_output.dim() - 1)))
-        else:
-            scaled_grads = grad_output * weights
-        return scaled_grads, None  # Return None for weights gradient
-
-
-def apply_sample_weights(tensor, weights):
-    """Apply sample weights to gradients during backpropagation."""
-    return SelectiveGradientFunction.apply(tensor, weights)
 
 
 class CurriculumMoCoV3(MoCoV3):
@@ -50,7 +23,6 @@ class CurriculumMoCoV3(MoCoV3):
                 curriculum_warmup_epochs (int): number of epochs to warm up the curriculum
                 curriculum_weight (float): weight for the reconstruction loss
                 reconstruction_masking_ratio (float): ratio of tokens to mask/predict
-                curriculum_reverse (bool): if True, prioritize hard samples first instead of easy ones
         """
         super().__init__(cfg)
         
@@ -60,38 +32,9 @@ class CurriculumMoCoV3(MoCoV3):
         self.curriculum_warmup_epochs = cfg.method_kwargs.get("curriculum_warmup_epochs", 10)
         self.curriculum_weight = cfg.method_kwargs.get("curriculum_weight", 1.0)
         self.masking_ratio = cfg.method_kwargs.get("reconstruction_masking_ratio", 0.75)
-        self.curriculum_reverse = cfg.method_kwargs.get("curriculum_reverse", False)  # New: Reverse curriculum direction
         
-        # Store optimizer name to use in configure_optimizers
-        self.optimizer = cfg.optimizer.name if hasattr(cfg.optimizer, 'name') else 'sgd'
-        
-        # Get optimizer settings
-        if hasattr(cfg.optimizer, 'lr'):
-            self.learning_rate = cfg.optimizer.lr
-        if hasattr(cfg.optimizer, 'weight_decay'):
-            self.weight_decay = cfg.optimizer.weight_decay
-        if hasattr(cfg.optimizer, 'momentum'):
-            self.momentum = cfg.optimizer.momentum
-        else:
-            self.momentum = 0.9  # Default momentum
-        
-        # Store LARS specific settings if they exist
-        self.lars = True if self.optimizer.lower() == 'lars' else False
-        
-        # Scheduler settings
-        self.scheduler = cfg.scheduler.name if hasattr(cfg, 'scheduler') and hasattr(cfg.scheduler, 'name') else None
-        if self.scheduler == "warmup_cosine":
-            self.warmup_epochs = cfg.scheduler.warmup_epochs
-            self.max_epochs = cfg.max_epochs
-            if hasattr(cfg.scheduler, 'warmup_start_lr'):
-                self.warmup_start_lr = cfg.scheduler.warmup_start_lr
-            if hasattr(cfg.scheduler, 'min_lr'):
-                self.min_lr = cfg.scheduler.min_lr
-        elif self.scheduler == "step":
-            if hasattr(cfg.scheduler, 'step_size'):
-                self.lr_step_size = cfg.scheduler.step_size
-            if hasattr(cfg.scheduler, 'gamma'):
-                self.lr_gamma = cfg.scheduler.gamma
+        print(f"Using curriculum strategy: {self.curriculum_strategy}")
+        print(f"Using curriculum type: {self.curriculum_type}")
         
         # Check if we're using a ViT backbone
         self.is_vit = 'vit' in self.backbone_name
@@ -137,13 +80,12 @@ class CurriculumMoCoV3(MoCoV3):
         """Configure the DDP strategy - needed for our manual optimization approach."""
         # Add find_unused_parameters=True to the DDP settings
         ddp_kwargs["find_unused_parameters"] = True
-        print("DDP configured with find_unused_parameters=True")
         return ddp_kwargs    
         
     @property
     def automatic_optimization(self) -> bool:
         """Tell PyTorch Lightning to use automatic optimization."""
-        return False
+        return True  # We switched to standard automatic optimization
     
     def _build_mae_decoder(self, embed_dim: int) -> nn.Module:
         """Build a lightweight decoder for MAE-style reconstruction."""
@@ -275,9 +217,6 @@ class CurriculumMoCoV3(MoCoV3):
             
         if "reconstruction_masking_ratio" not in cfg.method_kwargs:
             cfg.method_kwargs.reconstruction_masking_ratio = 0.75
-            
-        if "curriculum_reverse" not in cfg.method_kwargs:
-            cfg.method_kwargs.curriculum_reverse = False
         
         return cfg
 
@@ -412,21 +351,13 @@ class CurriculumMoCoV3(MoCoV3):
         # Compute prediction loss
         loss = F.mse_loss(pred_target, target_tokens)
         
-        # Compute per-sample errors with added noise to ensure variation
+        # Compute per-sample errors
         per_sample_error = torch.mean((pred_target - target_tokens)**2, dim=(1, 2))
-        
-        # Add small random noise to ensure variation in errors (helps with curriculum)
-        noise_scale = per_sample_error.mean() * 0.01  # Scale noise to be 1% of mean error
-        noise = torch.rand_like(per_sample_error) * noise_scale
-        per_sample_error = per_sample_error + noise
         
         return loss, per_sample_error
     
     def _compute_sample_weights_binary(self, per_sample_error, current_epoch):
-        """Binary masking approach - completely blocks hard/easy samples.
-        
-        If curriculum_reverse is True, prioritize hard samples first.
-        """
+        """Binary masking approach - completely blocks hard samples"""
         # Apply warmup to gradually include more samples
         if self.curriculum_warmup_epochs > 0:
             # Start with a low percentile (e.g., 10%) and gradually increase
@@ -436,43 +367,22 @@ class CurriculumMoCoV3(MoCoV3):
             current_percentile = 1.0  # Include all samples
         
         # Sort errors and find threshold
-        sorted_errors, sorted_indices = torch.sort(per_sample_error)
-        
-        # If all errors are identical, add small random noise to create variation
-        if per_sample_error.std() < 1e-6:
-            noise = torch.rand_like(per_sample_error) * 0.01
-            per_sample_error = per_sample_error + noise
-            sorted_errors, sorted_indices = torch.sort(per_sample_error)
-        
-        # If reversed, we want the hardest samples first (highest errors)
-        if self.curriculum_reverse:
-            # Invert the indices to get hardest first
-            sorted_indices = sorted_indices.flip(0)
-            sorted_errors = per_sample_error[sorted_indices]
-        
+        sorted_errors, _ = torch.sort(per_sample_error)
         threshold_idx = int(current_percentile * len(sorted_errors))
         
         if threshold_idx < len(sorted_errors):
             threshold = sorted_errors[threshold_idx]
+            threshold_value = threshold.item()  # Convert tensor to float safely
         else:
             threshold = float('inf')
+            threshold_value = float('inf')  # Already a Python float
         
-        # Create binary mask based on threshold
-        if self.curriculum_reverse:
-            # For reverse curriculum, include samples with errors >= threshold
-            mask = (per_sample_error >= threshold).float()
-        else:
-            # For normal curriculum, include samples with errors <= threshold
-            mask = (per_sample_error <= threshold).float()
+        # Create binary mask: 1 for samples below threshold, 0 for others
+        mask = (per_sample_error <= threshold).float()
         
         # Ensure at least one sample is included
         if mask.sum() == 0:
-            if self.curriculum_reverse:
-                # Include the hardest sample
-                mask[per_sample_error.argmax()] = 1.0
-            else:
-                # Include the easiest sample
-                mask[per_sample_error.argmin()] = 1.0
+            mask[per_sample_error.argmin()] = 1.0
         
         # Track curriculum metrics
         samples_included = mask.sum().item()
@@ -480,23 +390,27 @@ class CurriculumMoCoV3(MoCoV3):
         percent_included = (samples_included / batch_size) * 100
         
         # Enhanced logging for binary strategy
-        self.log("curriculum_direction", 1.0 if self.curriculum_reverse else 0.0, on_step=False, on_epoch=True)
         self.log("curriculum_samples_included", samples_included, on_step=True, on_epoch=True)
         self.log("curriculum_percent_included", percent_included, on_step=True, on_epoch=True)
         self.log("curriculum_target_percentile", current_percentile * 100, on_step=True, on_epoch=True)
+        self.log("curriculum_threshold_value", threshold_value, on_step=True, on_epoch=True)
         
-        # Log error statistics
+        # Additional detailed error statistics
         self.log("curriculum_errors_min", per_sample_error.min(), on_step=False, on_epoch=True)
         self.log("curriculum_errors_max", per_sample_error.max(), on_step=False, on_epoch=True)
         self.log("curriculum_errors_median", per_sample_error.median(), on_step=False, on_epoch=True)
         
+        # Log distribution of errors to understand curriculum better
+        error_mean_included = per_sample_error[mask.bool()].mean() if mask.sum() > 0 else torch.tensor(0.0, device=mask.device)
+        error_mean_excluded = per_sample_error[~mask.bool()].mean() if (~mask.bool()).sum() > 0 else torch.tensor(0.0, device=mask.device)
+        
+        self.log("curriculum_error_mean_included", error_mean_included, on_step=False, on_epoch=True)
+        self.log("curriculum_error_mean_excluded", error_mean_excluded, on_step=False, on_epoch=True)
+        
         return mask
     
     def _compute_sample_weights_exponential(self, per_sample_error, current_epoch):
-        """Exponential weighting - controls influence of samples by difficulty.
-        
-        If curriculum_reverse is True, prioritize hard samples (high weights for high errors).
-        """
+        """Exponential weighting - sharply diminishes influence of harder samples"""
         # Normalize errors to [0, 1]
         norm_errors = per_sample_error / (per_sample_error.max() + 1e-8)
         
@@ -511,20 +425,13 @@ class CurriculumMoCoV3(MoCoV3):
         else:
             alpha = min_alpha
         
-        # Compute weights based on normalized errors
-        if self.curriculum_reverse:
-            # For reversed curriculum: exp(α * error) - higher weight to harder samples
-            weights = torch.exp(alpha * norm_errors)
-        else:
-            # For normal curriculum: exp(-α * error) - higher weight to easier samples
-            weights = torch.exp(-alpha * norm_errors)
+        # Compute weights: exp(-α * error)
+        weights = torch.exp(-alpha * norm_errors)
         
         # Normalize weights to mean=1
         weights = weights / (weights.mean() + 1e-8)
         
         # Enhanced logging for exponential weighting
-        curriculum_direction = "hard-to-easy" if self.curriculum_reverse else "easy-to-hard"
-        self.log("curriculum_direction", 1.0 if self.curriculum_reverse else 0.0, on_step=False, on_epoch=True)
         self.log("curriculum_alpha", alpha, on_step=True, on_epoch=True)
         
         # Log distribution statistics
@@ -549,17 +456,10 @@ class CurriculumMoCoV3(MoCoV3):
         return weights
     
     def _compute_sample_weights_bands(self, per_sample_error, current_epoch):
-        """Difficulty bands approach - focuses on specific difficulty bands.
-        
-        If curriculum_reverse is True, start with hardest band and move to easier bands.
-        """
+        """Difficulty bands approach - focuses on progressively harder samples"""
         # Sort samples by difficulty
         B = per_sample_error.size(0)
         sorted_indices = torch.argsort(per_sample_error)
-        
-        # If reversed, flip the order to get hardest first
-        if self.curriculum_reverse:
-            sorted_indices = sorted_indices.flip(0)
         
         # Define band size (e.g., 25% of samples)
         band_size = max(1, int(B * 0.25))
@@ -570,7 +470,7 @@ class CurriculumMoCoV3(MoCoV3):
         else:
             progress = 1.0
         
-        # As training progresses, move between bands
+        # As training progresses, move from easiest to hardest band
         # At the end of warmup, all samples are weighted equally
         if progress >= 1.0:
             # After warmup, all samples have equal weight
@@ -594,8 +494,6 @@ class CurriculumMoCoV3(MoCoV3):
         weights = weights / (weights.mean() + 1e-8)
         
         # Enhanced logging for bands strategy
-        curriculum_direction = "hard-to-easy" if self.curriculum_reverse else "easy-to-hard"
-        self.log("curriculum_direction", 1.0 if self.curriculum_reverse else 0.0, on_step=False, on_epoch=True)
         band_start_pct = band_start / B if progress < 1.0 else 1.0
         self.log("curriculum_band_start", band_start_pct, on_step=True, on_epoch=True)
         self.log("curriculum_progress", progress, on_step=True, on_epoch=True)
@@ -660,83 +558,63 @@ class CurriculumMoCoV3(MoCoV3):
         return out
     
     def training_step(self, batch: Sequence[Any], batch_idx: int) -> torch.Tensor:
+        """Training step for Curriculum MoCo V3.
+        
+        Args:
+            batch: a batch of data in the format of [img_indexes, [X], Y]
+            batch_idx: index of the batch
+            
+        Returns:
+            total loss composed of MoCo V3 contrastive loss and reconstruction loss
         """
-        Step =  (a) update EMA  → momentum_forward
-                (b) reconstruction branch  → recon_loss (no backbone grad)
-                (c) curriculum weights     → sample_weights
-                (d) weighted contrastive   → contrastive_loss
-                (e)   optimiser‑1: backbone + projector + predictor
-                    optimiser‑2: decoder / JEPA predictor
-        """
-        # ----------------------------------------------------- 1 · bookkeeping
-        # Get optimizers correctly from PyTorch Lightning
-        optimizers = self.optimizers()
-        # Check if we have a list or single optimizer
-        if isinstance(optimizers, list):
-            opt_main, opt_recon = optimizers
-        else:
-            # If we only have one optimizer, use it for both
-            opt_main = opt_recon = optimizers
-            
-        opt_main.zero_grad()
-        opt_recon.zero_grad()
-
-        # ----------------------------------------------------- 2 · MoCo momentum update
-        # Fixed method to update momentum encoder manually instead of relying on parent class
-        # ----------------------------------------------------- 2 · MoCo momentum update
-        # Use the parent's update_momentum method if available, otherwise do it manually
-        try:
-            # First try to call the parent's update_momentum method
-            super().update_momentum()
-        except (AttributeError, NotImplementedError):
-            # If it fails, fall back to manual implementation
-            # Get momentum value
-            base_tau = getattr(self.momentum, 'base_tau', 0.996)  # Default value as fallback
-            
-            # Print for debugging
-            #print(f"Manually updating momentum encoders with tau={base_tau}")
-            
-            # Update each momentum pair
-            for online, target in self.momentum_pairs:
-                for online_param, target_param in zip(online.parameters(), target.parameters()):
-                    target_param.data = base_tau * target_param.data + (1 - base_tau) * online_param.data
-
-        # ----------------------------------------------------- 3 · unpack views
-        indexes, views = batch[0], batch[1]
-        x1, x2 = views[0], views[1]
-
-        # ----------------------------------------------------- 4 · forward passes (ONE per view)
-        out1   = super().forward(x1)              # online
-        out2   = super().forward(x2)
-        m_out1 = super().momentum_forward(x1)     # momentum
-        m_out2 = super().momentum_forward(x2)
-
-        q1, q2 = out1["q"], out2["q"]
-        k1, k2 = m_out1["k"].detach(), m_out2["k"].detach()
-
-        # ----------------------------------------------------- 5 · reconstruction ⟶ recon_loss, per‑sample error
+        # Get the current epoch
+        current_epoch = self.trainer.current_epoch
+        
+        # Extract indexes and images
+        indexes = batch[0]
+        X = batch[1]
+        
+        # Process both views separately
+        out1 = super().forward(X[0])
+        out2 = super().forward(X[1])
+        
+        momentum_out1 = super().momentum_forward(X[0])
+        momentum_out2 = super().momentum_forward(X[1])
+        
+        # Get contrastive learning features
+        q1 = out1["q"]  # Features from first view
+        q2 = out2["q"]  # Features from second view
+        
+        k1 = momentum_out1["k"]  # Momentum features from first view
+        k2 = momentum_out2["k"]  # Momentum features from second view
+        
+        # Forward features for reconstruction
         if self.is_vit:
-            feats = out1["feats_vit"].detach()            # detach = no backbone grad
+            # ViT-specific code
+            vit_feats = out1["feats_vit"].detach()  # Detach to prevent gradients to backbone
+            
             if self.curriculum_type == "mae":
                 # Create a random mask (True = masked)
                 mask_ratio = self.masking_ratio
-                num_tokens = feats.shape[1]
+                num_tokens = vit_feats.shape[1]
                 
                 # Exclude CLS token from masking if present
                 mask_start_idx = 1 if hasattr(self.backbone, "cls_token") else 0
                 
                 # Create random mask
-                mask = torch.zeros(feats.shape[0], num_tokens, dtype=torch.bool, device=feats.device)
+                mask = torch.zeros(vit_feats.shape[0], num_tokens, dtype=torch.bool, device=vit_feats.device)
                 mask_length = int(mask_ratio * (num_tokens - mask_start_idx))
-                for i in range(feats.shape[0]):
-                    mask_indices = torch.randperm(num_tokens - mask_start_idx, device=feats.device)[:mask_length]
+                for i in range(vit_feats.shape[0]):
+                    mask_indices = torch.randperm(num_tokens - mask_start_idx, device=vit_feats.device)[:mask_length]
                     mask[i, mask_indices + mask_start_idx] = True
                 
                 # Compute reconstruction loss and per-sample errors
-                recon_loss, per_error = self._compute_mae_reconstruction(feats, mask, batch)
-            else:  # JEPA
+                recon_loss, per_sample_error = self._compute_mae_reconstruction(vit_feats, mask, batch)
+                
+            else:  # JEPA-style for ViT
+                #print("Using JEPA with ViT")
                 # Split tokens into context and target sets
-                num_tokens = feats.shape[1]
+                num_tokens = vit_feats.shape[1]
                 
                 # Exclude CLS token from splitting if present
                 split_start_idx = 1 if hasattr(self.backbone, "cls_token") else 0
@@ -745,226 +623,111 @@ class CurriculumMoCoV3(MoCoV3):
                 target_ratio = self.masking_ratio
                 target_length = int(target_ratio * (num_tokens - split_start_idx))
                 
-                context_mask = torch.ones(feats.shape[0], num_tokens, dtype=torch.bool, device=feats.device)
-                target_mask = torch.zeros(feats.shape[0], num_tokens, dtype=torch.bool, device=feats.device)
+                context_mask = torch.ones(vit_feats.shape[0], num_tokens, dtype=torch.bool, device=vit_feats.device)
+                target_mask = torch.zeros(vit_feats.shape[0], num_tokens, dtype=torch.bool, device=vit_feats.device)
                 
-                for i in range(feats.shape[0]):
+                for i in range(vit_feats.shape[0]):
                     # Random permutation for each sample
-                    indices = torch.randperm(num_tokens - split_start_idx, device=feats.device)
+                    indices = torch.randperm(num_tokens - split_start_idx, device=vit_feats.device)
                     target_indices = indices[:target_length] + split_start_idx
                     context_mask[i, target_indices] = False
                     target_mask[i, target_indices] = True
                 
                 # Compute prediction loss and per-sample errors
-                recon_loss, per_error = self._compute_jepa_reconstruction(feats, context_mask, target_mask)
-        else:  # ResNet
+                recon_loss, per_sample_error = self._compute_jepa_reconstruction(vit_feats, context_mask, target_mask)
+                
+        else:  # ResNet/CNN backbone
             if self.curriculum_type == "mae":
-                pred_img = self.decoder(out1["feats"].detach())
-                tgt_img = x1
-                per_error = ((pred_img - tgt_img) ** 2).mean(dim=(1, 2, 3))
-                recon_loss = per_error.mean()
-            else:  # JEPA ResNet
-                pred_feats = self.predictor_jepa(out1["feats"].detach())
-                per_error = F.mse_loss(pred_feats, out2["feats"].detach(),
-                                    reduction='none').mean(dim=1)
-                recon_loss = per_error.mean()
-
-        # ----------------------------------------------------- 6 · curriculum weights
-        weights = self._compute_sample_weights(
-            per_error, self.trainer.current_epoch
-        )
-
-        # ----------------------------------------------------- 7 · weighted contrastive loss
-        def _dir(q, k_pos):
-            q_norm = F.normalize(q, dim=-1)
-            k_pos_norm = F.normalize(k_pos, dim=-1)
-            k_all = gather(k_pos_norm)
-            
-            # Apply curriculum weights to queries
-            q_weighted = apply_sample_weights(q_norm, weights)
-            
-            # Calculate logits and loss
-            logits = torch.einsum("nc,mc->nm", [q_weighted, k_all]) / self.temperature
-            bsz = q.size(0)
-            rank = self.trainer.global_rank
-            labels = torch.arange(bsz, device=q.device) + bsz * rank
-            loss = F.cross_entropy(logits, labels)
-            
-            return loss
-
-        # Compute weighted loss in both directions
-        loss1 = _dir(q1, k2)
-        loss2 = _dir(q2, k1)
-        
-        contrastive_loss = 0.5 * (loss1 + loss2)
-
-        # ----------------------------------------------------- 8 · back‑prop and optimiser steps
-        # Combine losses for a single backward pass to avoid DDP unused parameter issues
-        total_loss = contrastive_loss + recon_loss
-        self.manual_backward(total_loss)
-        
-        # Step both optimizers
-        opt_main.step()
-        opt_recon.step()
-
-
-        # ----------------------------------------------------- 9 · logging
-        self.log_dict(
-            {
-                "train_contrastive_loss": contrastive_loss,
-                "train_reconstruction_loss": recon_loss,
-                "train_total_loss": contrastive_loss + recon_loss,
-                "train_sample_weights_mean": weights.mean(),
-                "train_sample_weights_std": weights.std(),
-                "train_reconstruction_err_mean": per_error.mean(),
-                "train_samples_included": (weights > 0).float().sum(),
-                "train_percent_included": (weights > 0).float().mean() * 100,
-                "curriculum_phase": self.trainer.current_epoch / max(1, self.curriculum_warmup_epochs),
-            },
-            on_step=True, on_epoch=True, sync_dist=True,
-        )
-
-        # Lightning expects a tensor to monitor; return the backbone loss.
-        return contrastive_loss
-    
-    def update_momentum_manually(self):
-        """Updates momentum encoder via exponential moving average.
-        
-        Manually implemented since we can't rely on parent's update_momentum method.
-        """
-        # Get momentum value
-        base_tau = self.momentum.base_tau
-        current_tau = base_tau
-        
-        # Update each momentum pair
-        for online, target in self.momentum_pairs:
-            for online_param, target_param in zip(online.parameters(), target.parameters()):
-                target_param.data = current_tau * target_param.data + (1 - current_tau) * online_param.data
-    
-    def configure_optimizers(self):
-        """Configure optimizers for curriculum learning."""
-        # Get the params for the main backbone, projector, and predictor
-        base_params = super().learnable_params[:3]  # First 3 param groups from parent
-        
-        # Get the params for the reconstruction branch
-        if self.curriculum_type == "mae":
-            recon_params = [{"name": "decoder", "params": self.decoder.parameters()}]
-        else:  # JEPA
-            recon_params = [{"name": "predictor_jepa", "params": self.predictor_jepa.parameters()}]
-        
-        # Configure optimizers
-        optimizer_name = getattr(self, 'optimizer', 'sgd')
-        
-        # Get optimizer settings - these should have been set during initialization
-        # from the config values
-        lr = getattr(self, 'learning_rate', 0.01)
-        weight_decay = getattr(self, 'weight_decay', 1e-6)
-        momentum = getattr(self, 'momentum', 0.9)
-        
-        # LARS specific settings with solo-learn defaults
-        eta_lars = 0.001  # Default LARS trust coefficient
-        clip_lr = False   # Default - don't clip learning rate
-        exclude_bias_n_norm = False  # Default - apply LARS to all parameters
-        
-        if optimizer_name.lower() == "lars":
-            # Using the imported LARS optimizer from solo-learn
-            main_optimizer = LARS(
-                base_params,
-                lr=lr,
-                momentum=momentum,
-                weight_decay=weight_decay,
-                eta=eta_lars,
-                clip_lr=clip_lr,
-                exclude_bias_n_norm=exclude_bias_n_norm,
-            )
-            
-            recon_optimizer = LARS(
-                recon_params,
-                lr=lr,
-                momentum=momentum,
-                weight_decay=weight_decay,
-                eta=eta_lars,
-                clip_lr=clip_lr,
-                exclude_bias_n_norm=exclude_bias_n_norm,
-            )
-        elif optimizer_name == "sgd":
-            main_optimizer = torch.optim.SGD(
-                base_params,
-                lr=lr,
-                momentum=momentum,
-                weight_decay=weight_decay,
-            )
-            recon_optimizer = torch.optim.SGD(
-                recon_params,
-                lr=lr,
-                momentum=momentum,
-                weight_decay=weight_decay,
-            )
-        elif optimizer_name == "adam":
-            main_optimizer = torch.optim.Adam(
-                base_params,
-                lr=lr,
-                weight_decay=weight_decay,
-            )
-            recon_optimizer = torch.optim.Adam(
-                recon_params,
-                lr=lr,
-                weight_decay=weight_decay,
-            )
-        else:
-            print(f"Warning: Unknown optimizer '{optimizer_name}', defaulting to SGD")
-            main_optimizer = torch.optim.SGD(
-                base_params,
-                lr=lr,
-                momentum=momentum,
-                weight_decay=weight_decay,
-            )
-            recon_optimizer = torch.optim.SGD(
-                recon_params,
-                lr=lr,
-                momentum=momentum,
-                weight_decay=weight_decay,
-            )
-        
-         # Configure the scheduler with SAFETY CHECKS
-        scheduler_name = getattr(self, 'scheduler', None)
-        if scheduler_name == "warmup_cosine":
-            warmup_epochs = getattr(self, 'warmup_epochs', 2)
-            max_epochs = getattr(self, 'max_epochs', 100)
-            warmup_start_lr = getattr(self, 'warmup_start_lr', 0.01)
-            min_lr = getattr(self, 'min_lr', 0.0001)
-            
-            
-            try:
-                from solo.utils.lr_scheduler import LinearWarmupCosineAnnealingLR
+                # For MAE-style, compute image reconstruction
+                orig_images = batch[1][0]  # Shape: [B, 3, 224, 224]
+                B = out1["feats"].shape[0]
                 
-                scheduler = LinearWarmupCosineAnnealingLR(
-                    main_optimizer,
-                    warmup_epochs=warmup_epochs,
-                    max_epochs=max_epochs,
-                    warmup_start_lr=warmup_start_lr,
-                    eta_min=min_lr,
-                )
-                return [main_optimizer, recon_optimizer], [scheduler]
-            except ImportError:
-                # Fallback to standard CosineAnnealingLR
-                print("Warning: solo.utils.lr_scheduler not found, using standard CosineAnnealingLR")
-                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                    main_optimizer, T_max=max_epochs, eta_min=min_lr
-                )
-                return [main_optimizer, recon_optimizer], [
-                {"scheduler": scheduler, "interval": "epoch"}  # default but explicit
-            ]
+                # Detach features from backbone to prevent reconstruction gradients from flowing back
+                detached_feats = out1["feats"].detach()
                 
-        elif scheduler_name == "step":
-            lr_step_size = getattr(self, 'lr_step_size', 30)
-            lr_gamma = getattr(self, 'lr_gamma', 0.1)
-            
-            scheduler = torch.optim.lr_scheduler.StepLR(
-                main_optimizer, step_size=lr_step_size, gamma=lr_gamma
-            )
-            return [main_optimizer, recon_optimizer], [
-               {"scheduler": scheduler, "interval": "epoch"}  # default but explicit
-            ]
-        # If no scheduler
-        return [main_optimizer, recon_optimizer]
+                # Decode features to image space (full 224x224 resolution)
+                pred_images = self.decoder(detached_feats)  # Shape: [B, 3, 224, 224]
+                
+                # Compute per-sample reconstruction errors (MSE for each sample)
+                per_sample_error = ((pred_images - orig_images) ** 2).mean(dim=(1, 2, 3))
+                
+                # Compute overall reconstruction loss
+                recon_loss = per_sample_error.mean()
+                
+            else:  # JEPA-style for ResNet
+                #print("Using JEPA with ResNet")
+                # New JEPA implementation for ResNet
+                # Use features from both views
+                feats1 = out1["feats"].detach()  # [B, D]
+                feats2 = out2["feats"].detach()  # [B, D]
+                B = feats1.shape[0]
+                
+                # For ResNet JEPA, we'll use features from view 1 as context
+                # and predict features from view 2 as target
+                context_feats = feats1
+                target_feats = feats2
+                
+                # Use the predictor to predict target features from context
+                pred_target_feats = self.predictor_jepa(context_feats)
+                
+                # Compute per-sample prediction errors
+                per_sample_error = F.mse_loss(pred_target_feats, target_feats, reduction='none').mean(dim=1)
+                
+                # Compute overall prediction loss
+                recon_loss = per_sample_error.mean()
+                
+                # Log JEPA-specific metrics
+                self.log("jepa_prediction_error", recon_loss, on_step=True, on_epoch=True)
+        
+        # Compute sample weights based on reconstruction errors
+        sample_weights = self._compute_sample_weights(per_sample_error, current_epoch)
+        
+        # Compute the weighted contrastive loss
+        # First direction: q1 to k2
+        q1_norm = F.normalize(q1, dim=-1)
+        k2_norm = F.normalize(k2, dim=-1)
+        
+        # Gather all targets from all GPUs
+        k2_all = gather(k2_norm)
+        
+        # Compute logits
+        logits1 = torch.einsum("nc,mc->nm", [q1_norm, k2_all]) / self.temperature
+        
+        # Create labels - we want to match the i-th query with the i-th key
+        batch_size = q1_norm.shape[0]
+        labels = torch.arange(batch_size, device=q1_norm.device) + batch_size * self.trainer.global_rank
+        
+        # Compute per-sample cross-entropy loss
+        per_sample_nll1 = F.cross_entropy(logits1, labels, reduction='none')
+        
+        # Apply sample weights
+        weighted_contrastive_loss1 = (per_sample_nll1 * sample_weights).mean()
+        
+        # Second direction: q2 to k1
+        q2_norm = F.normalize(q2, dim=-1)
+        k1_norm = F.normalize(k1, dim=-1)
+        k1_all = gather(k1_norm)
+        logits2 = torch.einsum("nc,mc->nm", [q2_norm, k1_all]) / self.temperature
+        per_sample_nll2 = F.cross_entropy(logits2, labels, reduction='none')
+        weighted_contrastive_loss2 = (per_sample_nll2 * sample_weights).mean()
+        
+        # Combine both directions
+        weighted_contrastive_loss = (weighted_contrastive_loss1 + weighted_contrastive_loss2) / 2
+        
+        # Log metrics for both losses
+        metrics = {
+            "train_contrastive_loss": weighted_contrastive_loss,
+            "train_reconstruction_loss": recon_loss,
+            "train_sample_weights_mean": sample_weights.mean(),
+            "train_sample_weights_std": sample_weights.std(),
+            "train_reconstruction_error_mean": per_sample_error.mean(),
+        }
+        self.log_dict(metrics, on_epoch=True, on_step=True, sync_dist=True)
+        
+        # Combine both losses for a single backward pass
+        combined_loss = weighted_contrastive_loss + self.curriculum_weight * recon_loss
+        
+        # Log combined loss
+        self.log("train_total_loss", combined_loss, on_epoch=True, on_step=True, sync_dist=True)
+        
+        return combined_loss

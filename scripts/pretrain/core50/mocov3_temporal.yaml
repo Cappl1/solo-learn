@@ -11,7 +11,7 @@ hydra:
   run:
     dir: .
 
-name: "mocov3-temporal-core50"
+name: "mocov3-temporal-core50-bs512"
 method: "mocov3"
 backbone:
   name: "resnet18"
@@ -62,8 +62,8 @@ knn_clb:
   k: [10, 20, 50, 100]
   temperature: 0.07
 # overwrite PL stuff
-max_epochs: 10
-devices: [0]  # Adjust based on available GPUs
+max_epochs: 100
+devices: [0,1,2]  # Adjust based on available GPUs
 sync_batchnorm: True
 accelerator: "gpu"
 strategy: "ddp"
