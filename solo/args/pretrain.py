@@ -33,6 +33,8 @@ _N_CLASSES_PER_DATASET = {
     "ego4d": 0,
     "core50": 50,
     "temporal_core50": 50,
+    "selective_temporal_core50": 50,
+    "temporal_mvimagenet": 238,  # MVImageNet has 238 object categories
 }
 
 _SUPPORTED_DATASETS = [
@@ -47,7 +49,9 @@ _SUPPORTED_DATASETS = [
     "tiny",
     "ego4d",
     "core50",
-    "temporal_core50"
+    "temporal_core50",
+    "selective_temporal_core50",
+    "temporal_mvimagenet"
 ]
 
 

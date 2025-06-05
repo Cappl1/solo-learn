@@ -30,6 +30,7 @@ _N_CLASSES_PER_DATASET = {
     "imagenet100_42": 100,
     "tiny": 200,
     "core50": 50,
+    "core50_categories": 10,
     "DTD": 47,
     "Flowers102": 102,
     "FGVCAircraft": 100,
@@ -48,7 +49,8 @@ _N_CLASSES_PER_DATASET = {
     "imagenet10pct_42": 1000,
     "toybox": 348,
     'core50_bg': 11,
-    'COIL100': 100
+    'COIL100': 100,
+    "temporal_mvimagenet": 238 # MVImageNet has 1000 object categories
 }
 
 _SUPPORTED_DATASETS = [
@@ -63,6 +65,7 @@ _SUPPORTED_DATASETS = [
     "imagenet_42",
     "imagenet100_42",
     'core50',
+    'core50_categories',
     "custom",
     "DTD",
     'Flowers102',
@@ -84,7 +87,8 @@ _SUPPORTED_DATASETS = [
     "STL10_224",
     "STL10_FG_224",
     "STL10_FG",
-    "tiny"
+    "tiny",
+    "temporal_mvimagenet"
 ]
 
 

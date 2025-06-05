@@ -1,0 +1,57 @@
+defaults:
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+# disable hydra outputs
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+# Basic model configuration for evaluation
+backbone:
+  name: "vgg16"
+  kwargs:
+    pretrained: false
+
+# Curriculum learning method configuration
+method_kwargs:
+  curriculum_type: "mae"  # or "jepa"
+  curriculum_strategy: "exponential"  # "binary", "exponential", or "bands"
+  curriculum_warmup_epochs: 10
+  curriculum_weight: 1.0
+  reconstruction_masking_ratio: 0.75
+  curriculum_reverse: false
+
+# Data configuration
+data:
+  dataset: "core50"
+  val_path: "/home/brothen/core50_arr.h5"
+  format: "h5"
+  num_classes: 50
+  num_workers: 4
+  val_backgrounds: ["s3", "s7", "s10"]  # test sessions for evaluation
+  dataset_kwargs:
+    use_categories: false
+
+# Optimizer configuration (needed for model initialization)
+optimizer:
+  name: "lars"
+  batch_size: 64
+  lr: 0.3
+  weight_decay: 0
+  momentum: 0.9
+
+# Scheduler configuration (needed for model initialization)
+scheduler:
+  name: "warmup_cosine"
+  warmup_start_lr: 0.00001
+  warmup_epochs: 0.0
+  min_lr: 0.0
+
+# Training configuration (needed for model initialization)
+max_epochs: 100
+devices: [0]
+accelerator: "gpu"
+strategy: "ddp" 

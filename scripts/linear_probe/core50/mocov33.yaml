@@ -1,0 +1,60 @@
+defaults:
+  - _self_
+  - wandb: private.yaml
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+# disable hydra outputs
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+name: "predify_simclr_no_pcoder_grads_10epochs"
+backbone:
+  name: "vgg16"
+pretrained_feature_extractor: "/home/brothen/solo-learn/trained_models/predify_simclr/scratch_no_pcoder/predify-simclr-temporal-no-aug-no-pcoder-grads-o0a4gkg7-ep=10-stp=13750.ckpt"
+data:
+  dataset: "core50"
+  train_path: "/home/brothen/core50_arr.h5"
+  val_path: "/home/brothen/core50_arr.h5"
+  format: "h5"
+  num_classes: 50
+  num_workers: 4
+  train_backgrounds: ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]  # train sessions
+  val_backgrounds: ["s3", "s7", "s10"]  # test sessions
+  dataset_kwargs:
+    use_categories: False # Enable category-based evaluation
+optimizer:
+  name: "lars"
+  batch_size: 64
+  lr: 0.3
+  weight_decay: 0
+scheduler:
+  name: "warmup_cosine"
+  warmup_start_lr: 0.00001
+  warmup_epochs: 0.0
+  max_epochs: 100
+  interval: "epoch"
+checkpoint:
+  enabled: True
+  dir: "trained_models/linear"
+  frequency: 1
+grid:
+  enabled: False
+early_stopping:
+  monitor: "val/loss"
+  enabled: True
+  patience: 5
+
+pre_extract_feats: False
+finetune: False
+# extra training options
+auto_resume:
+  enabled: False
+max_epochs: 100
+devices: [0]
+sync_batchnorm: True
+accelerator: "gpu"
+strategy: "ddp"
+precision: 32

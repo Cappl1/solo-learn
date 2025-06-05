@@ -22,11 +22,14 @@ class TemporalCore50(Dataset):
                  transform: Optional[Callable] = None,
                  time_window: int = 15,  # How far to look for temporal pairs
                  backgrounds: Optional[List[str]] = None,  # Session IDs to use
+                 use_categories: bool = False,  # Convert instance labels to category labels
                  ):
         self.transform = transform
         self.time_window = time_window
         self.h5_path = h5_path
+        self.use_categories = use_categories
         print(f"Loading Core50 dataset from: {h5_path} with time_window={time_window}")
+        print(f"Using categories: {use_categories}")
         
         # Use swmr mode (single-writer, multiple-reader) for better concurrent access
         # Mode 'r' is read-only, which is what we need for the dataset
@@ -134,7 +137,15 @@ class TemporalCore50(Dataset):
         # Get the object_id for this image
         object_id = h5_file[session]['targets'][local_idx]
         
-        # Get the sequence key
+        # Convert to category label if requested (instance_id // 5 = category_id)
+        if self.use_categories:
+            target = int(object_id) // 5
+            assert 0 <= target < 10, f"Invalid category label {target} derived from instance {object_id}"
+        else:
+            target = int(object_id)
+            assert 0 <= target < 50, f"Invalid instance label {target}"
+        
+        # Get the sequence key (still use original object_id for temporal grouping)
         sequence_key = (session, int(object_id))
         
         # Find the position of this image in its sequence
@@ -142,6 +153,7 @@ class TemporalCore50(Dataset):
         position_in_sequence = sequence.index(idx)
         
         # Choose another frame from the same sequence within the time window
+        offset = 0 # Initialize offset
         if len(sequence) > 1 and self.time_window > 0:
             # Find valid range for temporal offset
             min_offset = max(-self.time_window, -position_in_sequence)
@@ -180,6 +192,6 @@ class TemporalCore50(Dataset):
         # Apply transformations
         if self.transform is not None:
             # Pass both images to the transform pipeline
-            return self.transform(image, paired_image), int(object_id)
+            return self.transform(image, paired_image), target
         
-        return (image, paired_image), int(object_id)
+        return (image, paired_image), target

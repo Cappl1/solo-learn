@@ -154,7 +154,7 @@ class WeightedKNNClassifier(Metric):
             retrieved_neighbors = torch.gather(candidates, 1, indices)
 
             retrieval_one_hot.resize_(batch_size * k, num_classes).zero_()
-            retrieval_one_hot.scatter_(1, retrieved_neighbors.view(-1, 1), 1)
+            retrieval_one_hot.scatter_(1, retrieved_neighbors.view(-1, 1).to(torch.int64), 1)
 
             if self.distance_fx == "cosine":
                 similarities = similarities.clone().div_(self.T).exp_()

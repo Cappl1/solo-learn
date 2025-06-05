@@ -19,6 +19,47 @@ class KNNCallback(pl.Callback):
     def on_fit_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
         T_train, T_val = prepare_transforms(self.cfg.dataset)
 
+        # For TemporalCore50, wrap transforms to handle paired images
+        if self.cfg.dataset in ["temporal_core50", "temporal_mvimagenet"]:
+            # Create wrappers that handle paired images
+            original_t_train = T_train
+            original_t_val = T_val
+            
+            # Create wrapper classes that only use the first image
+            class SingleImageWrapper:
+                def __init__(self, transform):
+                    self.transform = transform
+                
+                def __call__(self, img, paired_img=None):
+                    # Only transform the first image, ignore the paired image
+                    return self.transform(img)
+            
+            T_train = SingleImageWrapper(original_t_train)
+            T_val = SingleImageWrapper(original_t_val)
+
+        # Extract and prepare dataset_kwargs for special datasets
+        dataset_kwargs = {}
+        if self.cfg.dataset in ["core50", "temporal_core50"]:
+            # For Core50 datasets, pass train/val backgrounds
+            train_backgrounds = getattr(self.cfg, "train_backgrounds", None)
+            val_backgrounds = getattr(self.cfg, "val_backgrounds", None)
+            if train_backgrounds is not None:
+                dataset_kwargs["train_backgrounds"] = train_backgrounds
+            if val_backgrounds is not None:
+                dataset_kwargs["val_backgrounds"] = val_backgrounds
+        elif self.cfg.dataset == "temporal_mvimagenet":
+            # For temporal MVImageNet, pass all required parameters
+            if hasattr(self.cfg, "metadata_path"):
+                dataset_kwargs["metadata_path"] = self.cfg.metadata_path
+            if hasattr(self.cfg, "time_window"):
+                dataset_kwargs["time_window"] = self.cfg.time_window
+            if hasattr(self.cfg, "val_split"):
+                dataset_kwargs["val_split"] = self.cfg.val_split
+            if hasattr(self.cfg, "stratify_by_category"):
+                dataset_kwargs["stratify_by_category"] = self.cfg.stratify_by_category
+            if hasattr(self.cfg, "random_seed"):
+                dataset_kwargs["random_seed"] = self.cfg.random_seed
+
         train_dataset, val_dataset = prepare_datasets(
             self.cfg.dataset,
             T_train,
@@ -26,7 +67,7 @@ class KNNCallback(pl.Callback):
             train_data_path=self.cfg.train_path,
             val_data_path=self.cfg.val_path,
             data_format=self.cfg.format,
-
+            **dataset_kwargs
         )
         self.train_loader = DataLoader(
             train_dataset,
@@ -68,12 +109,26 @@ class KNNCallback(pl.Callback):
     def _run(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"):
         if not trainer.sanity_checking and not trainer.fast_dev_run:
             torch.cuda.empty_cache()
-            pl_module.eval()
+            
+            original_training_state = pl_module.training # Store original mode
 
+            # Always use eval mode for feature extraction in KNN
+            pl_module.eval()
+            # Optional: Add a print statement here if you want to confirm it's being set to eval
+            # print("[KNN] Setting model to EVAL mode for feature extraction.")
+
+            # Extract features
             result = self.run(trainer, pl_module)
 
             torch.cuda.empty_cache()
-            pl_module.train()
+            
+            # Restore original training/eval state
+            pl_module.train(original_training_state)
+            # Optional: Add a print statement here to confirm restoration
+            # if original_training_state:
+            #     print("[KNN] Restored model to TRAIN mode.")
+            # else:
+            #     print("[KNN] Restored model to EVAL mode.")
 
             for k, value in result.items():
                 if hasattr(trainer.logger, 'log_metrics'):
@@ -92,7 +147,12 @@ class KNNCallback(pl.Callback):
 
         res_X, res_y = [], []
         for batch in bar:
-            X, y = batch
+            # Handle both dataset_with_index format (index, X, y) and normal format (X, y)
+            if len(batch) == 3:  # dataset_with_index format
+                _, X, y = batch
+            else:  # normal format
+                X, y = batch
+                
             X = X.to(model.device, non_blocking=True)
             y = y.to(model.device, non_blocking=True)
 

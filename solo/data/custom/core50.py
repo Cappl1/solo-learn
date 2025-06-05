@@ -12,8 +12,10 @@ class Core50(Dataset):
                  h5_path: str,
                  backgrounds: Optional[Tuple[str, ...]] = None,
                  transform: Optional[Callable] = None,
+                 use_categories: bool = False,
                  ):
         self.transform = transform
+        self.use_categories = use_categories
         print(h5_path, Path(h5_path).exists())
 
         self.h5_file = h5py.File(h5_path, "r")
@@ -39,6 +41,17 @@ class Core50(Dataset):
 
         image = Image.fromarray(bg.get("images")[dp.h5_index])
         target = bg.get("targets")[dp.h5_index]
+
+        original_target = target
+        remapped_flag = False
+
+        if self.use_categories:
+            remapped_flag = True
+            category_label = target // 5
+            assert 0 <= category_label < 10, f"Invalid category label {category_label} derived from instance {target} at index {idx}"
+            target = category_label
+        else:
+            assert 0 <= target < 50, f"Invalid instance label {target} at index {idx}"
 
         if self.transform is not None:
             image = self.transform(image)

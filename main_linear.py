@@ -66,7 +66,19 @@ def main(cfg: DictConfig):
     backbone_model = BaseMethod._BACKBONES[cfg.backbone.name]
 
     # initialize backbone
-    backbone = backbone_model(method=cfg.pretrain_method, **cfg.backbone.kwargs)
+    init_args = {**cfg.backbone.kwargs}
+    sig = inspect.signature(backbone_model)
+
+    # Only add 'method' to kwargs if it's an accepted parameter by backbone_model
+    # and cfg.pretrain_method is actually defined.
+    if 'method' in sig.parameters:
+        if hasattr(cfg, 'pretrain_method'):  # Check if pretrain_method attribute exists
+            init_args['method'] = cfg.pretrain_method
+        # If 'method' is in the signature but cfg.pretrain_method is not set,
+        # 'method' won't be passed. This is safer than the original code which would
+        # raise an AttributeError if cfg.pretrain_method was missing.
+
+    backbone = backbone_model(**init_args)
     if cfg.backbone.name.startswith("resnet"):
         # remove fc layer
         backbone.fc = nn.Identity()
@@ -74,6 +86,9 @@ def main(cfg: DictConfig):
         if cifar:
             backbone.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=2, bias=False)
             backbone.maxpool = nn.Identity()
+    elif "efficientnet" in cfg.backbone.name:
+        if hasattr(backbone, 'classifier'):
+            backbone.classifier = nn.Identity()
 
     ckpt_path = cfg.pretrained_feature_extractor
 
@@ -114,6 +129,8 @@ def main(cfg: DictConfig):
     else:
         loss_func = torch.nn.CrossEntropyLoss()
 
+    # Add print to check num_classes right before model initialization
+    print(f"[DEBUG] Initializing LinearModel with num_classes: {cfg.data.num_classes}")
     model = LinearModel(backbone, loss_func=loss_func, mixup_func=mixup_func, cfg=cfg)
     make_contiguous(model)
     # can provide up to ~20% speed up
@@ -125,6 +142,10 @@ def main(cfg: DictConfig):
     else:
         val_data_format = cfg.data.format
         
+    # Extract the use_categories parameter if present in dataset_kwargs
+    use_categories = False
+    if cfg.data.get('dataset_kwargs') is not None and 'use_categories' in cfg.data.dataset_kwargs:
+        use_categories = cfg.data.dataset_kwargs.use_categories
 
     train_loader, val_loader = prepare_data(
         cfg.data.dataset,
@@ -135,7 +156,8 @@ def main(cfg: DictConfig):
         num_workers=cfg.data.num_workers,
         auto_augment=cfg.auto_augment,
         train_backgrounds=cfg.data.train_backgrounds,
-        val_backgrounds=cfg.data.val_backgrounds
+        val_backgrounds=cfg.data.val_backgrounds,
+        use_categories=use_categories  # Pass directly as an argument
     )
 
     if cfg.data.format == "dali":

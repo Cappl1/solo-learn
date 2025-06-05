@@ -10,18 +10,21 @@ hydra:
   run:
     dir: .
 
-name: "jepa_binary"
+name: "predify_simclr_ture_predify_pretrained_20epochs"
 backbone:
-  name: "resnet18"
-pretrained_feature_extractor: "trained_models/curriculum_mocov3/jepa_binary/mocov3-curriculum-jepa-binary-core50-rriw6y2s-ep=10-stp=0.ckpt"  # Update this path to your actual checkpoint
+  name: "vgg16"
+pretrained_feature_extractor: "/home/brothen/solo-learn/trained_models/predify_simclr/9ipz3vhg/predify-simclr-temporal-no-aug-from-scratch-true-predify-pretrained-9ipz3vhg-ep=20-stp=26250.ckpt"
 data:
   dataset: "core50"
   train_path: "/home/brothen/core50_arr.h5"
   val_path: "/home/brothen/core50_arr.h5"
   format: "h5"
+  num_classes: 50
   num_workers: 4
   train_backgrounds: ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]  # train sessions
   val_backgrounds: ["s3", "s7", "s10"]  # test sessions
+  dataset_kwargs:
+    use_categories: False # Enable category-based evaluation
 optimizer:
   name: "lars"
   batch_size: 64

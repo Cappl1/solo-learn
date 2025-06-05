@@ -31,7 +31,7 @@ warnings.filterwarnings(
 
 import hydra
 import torch
-from lightning.pytorch import Trainer, seed_everything
+from lightning.pytorch import Trainer, seed_everything, Callback
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelSummary
 from lightning.pytorch.loggers.wandb import WandbLogger
 from lightning.pytorch.strategies.ddp import DDPStrategy
@@ -43,6 +43,7 @@ from solo.methods import METHODS
 from solo.utils.auto_resumer import AutoResumer
 from solo.utils.checkpointer import Checkpointer
 from solo.utils.knn_callback import KNNCallback
+from solo.utils.difficulty_metrics_callbacks import DifficultyMetricsCallback
 from solo.utils.misc import make_contiguous, omegaconf_select
 
 try:
@@ -130,6 +131,15 @@ def main(cfg: DictConfig):
             frequency=cfg.auto_umap.frequency,
         )
         callbacks.append(auto_umap)
+        
+    # Add difficulty metrics callback if enabled
+    if omegaconf_select(cfg, "difficulty_metrics.enabled", False):
+        # Pass all kwargs from the config section directly
+        callback_kwargs = {k: v for k, v in cfg.difficulty_metrics.items() 
+                          if k not in ["enabled"]}
+        
+        difficulty_metrics = DifficultyMetricsCallback(**callback_kwargs)
+        callbacks.append(difficulty_metrics)
 
     d = os.environ["WANDB_DIR"] if "WANDB_DIR" in os.environ else "./"
     # wandb logging
@@ -145,7 +155,10 @@ def main(cfg: DictConfig):
             id=wandb_run_id,
             save_dir=d
         )
+        # Re-enable gradient logging
         wandb_logger.watch(model, log="gradients", log_freq=100)
+        # Comment out parameter-only logging if gradients are preferred
+        # wandb_logger.watch(model, log="parameters", log_freq=100)
         wandb_logger.log_hyperparams(OmegaConf.to_container(cfg))
 
         # lr logging
@@ -166,7 +179,7 @@ def main(cfg: DictConfig):
             "logger": wandb_logger if cfg.wandb.enabled else None,
             "callbacks": callbacks,
             "enable_checkpointing": False,
-            "strategy": DDPStrategy(find_unused_parameters=False)
+            "strategy": DDPStrategy(find_unused_parameters=cfg.method == "curriculum_mocov3")
             if cfg.strategy == "ddp"
             else cfg.strategy,
         }

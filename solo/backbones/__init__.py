@@ -27,13 +27,16 @@ from .poolformer import (
     poolformer_m48,
 )
 from .resnet import resnet18, resnet50
+from .efficientnet import efficientnet_b0
 from .swin import swin_tiny, swin_small, swin_base, swin_large
 from .vit import vit_tiny, vit_small, vit_base, vit_large
 from .wide_resnet import wide_resnet28w2, wide_resnet28w8
+from .vgg import vgg16
 
 __all__ = [
     "resnet18",
     "resnet50",
+    "efficientnet_b0",
     "vit_tiny",
     "vit_small",
     "vit_base",
@@ -53,4 +56,5 @@ __all__ = [
     "convnext_large",
     "wide_resnet28w2",
     "wide_resnet28w8",
+    "vgg16",
 ]

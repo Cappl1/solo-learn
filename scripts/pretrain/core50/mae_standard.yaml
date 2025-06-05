@@ -1,0 +1,113 @@
+# Config for Standard MAE pretraining on CORe50 dataset with ViT-Small backbone
+# Compatible with main_pretrain.py
+
+defaults:
+  - _self_
+  - augmentations: asymmetric.yaml # Keep asymmetric for consistency, though MAE often uses simpler augs
+  - wandb: private.yaml
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+# disable hydra outputs
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+name: "mae-standard-core50-vit_small" # Updated name
+method: "mae" # Changed method to standard MAE
+no_validation: False
+
+backbone:
+  name: "vit_small"
+
+method_kwargs:
+  # Standard MAE parameters (adjust if your standard MAE impl uses different names)
+  mask_ratio: 0.75
+  decoder_embed_dim: 256
+  decoder_depth: 4
+  decoder_num_heads: 8
+  norm_pix_loss: True
+  # Removed temporal specific parameters: delta_max, cross_attention_layers
+
+# Momentum settings might not be relevant for standard MAE - check MAE implementation
+# If not used, these can be removed or ignored.
+momentum:
+  base_tau: 0.996
+  final_tau: 0.996
+
+data:
+  dataset: "core50" # Changed dataset to standard Core50
+  train_path: "/home/brothen/core50_arr.h5"
+  val_path: "/home/brothen/core50_arr.h5"
+  format: "h5"
+  num_classes: 50
+  fraction: -1.0
+  num_workers: 4
+  num_large_crops: 1 # Changed to 1 large crop for standard MAE
+  num_small_crops: 0
+  dataset_kwargs: # No time_window needed here
+    backgrounds: ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]
+    #val_backgrounds: ["s3", "s7", "s10"] # Removed as Core50 dataset doesn't accept it
+    # Removed time_window
+
+optimizer:
+  name: "adamw"
+  batch_size: 64
+  lr: 1.5e-4
+  classifier_lr: 3e-4 # Keep if you train a classifier head
+  weight_decay: 0.05
+  no_labels: False # Keep if you train a classifier head
+
+scheduler:
+  name: "warmup_cosine"
+  warmup_epochs: 10
+  warmup_start_lr: 0.0
+
+checkpoint:
+  enabled: True
+  dir: "trained_models"
+  frequency: 1
+  keep_prev: True
+  every_n_iter: 5000
+
+auto_resume:
+  enabled: False
+
+# KNN evaluation callback config
+knn_clb:
+  enabled: True
+  dataset: "core50"
+  train_path: "/home/brothen/core50_arr.h5"
+  val_path: "/home/brothen/core50_arr.h5"
+  num_workers: 4
+  batch_size: 64
+  k: [10, 20, 50, 100]
+  temperature: 0.07
+  train_backgrounds: ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]
+  val_backgrounds: ["s3", "s7", "s10"]
+
+# training settings
+max_epochs: 100
+devices: [0,1,2]
+sync_batchnorm: True
+accelerator: "gpu"
+strategy: "ddp"
+precision: 32
+num_sanity_val_steps: 10
+check_val_every_n_epoch: 1 # Changed to 5 to match previous setting
+num_nodes: 1
+
+# difficulty metrics callback configuration
+difficulty_metrics:
+  enabled: True
+  dataset_path: "/home/brothen/core50_arr.h5"
+  eval_frequency: 1 # Evaluate every 5 epochs
+  num_samples: 1000
+  compute_rank_stability: True
+  save_metrics: True
+  output_dir: "/home/brothen/solo-learn/difficulty_metrics_output/mae_standard" # Changed output dir
+  dataset_kwargs:
+    backgrounds: ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]
+    # Removed time_window
+  model_type: "mae" # Correctly set to MAE 

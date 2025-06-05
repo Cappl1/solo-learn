@@ -11,7 +11,7 @@ hydra:
   run:
     dir: .
 
-name: "mocov3-curriculum-mae-exponential-core50"
+name: "mocov3-curriculum-mae-exponential-core50-bs3x64-rev"
 method: "curriculum_mocov3"  # Use our new curriculum method
 backbone:
   name: "resnet18"
@@ -23,6 +23,7 @@ method_kwargs:
   
   # Curriculum learning parameters
   curriculum_type: "mae"
+  curriculum_reverse: True
   curriculum_strategy: "exponential"  # Use exponential weighting
   curriculum_warmup_epochs: 10
   curriculum_weight: 1.0
@@ -34,12 +35,13 @@ momentum:
 data:
   dataset: temporal_core50  # Use our temporal dataset
   train_path: "/home/brothen/core50_arr.h5"  # Path to your H5 file
-  val_path: None
+  val_path: "/home/brothen/core50_arr.h5"
   format: "h5"
   num_workers: 4
   dataset_kwargs:
     # Use standard Core50 train sessions
     backgrounds: ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]
+    val_backgrounds: ["s3", "s7", "s10"]  # Validation sessions
     time_window: 15  # Temporal offset window
 optimizer:
   name: "lars"
@@ -50,18 +52,17 @@ optimizer:
   no_labels: False  # Core50 has labels
 scheduler:
   name: "warmup_cosine"
-  warmup_epochs: 0.01
-  max_epochs: 100          
+  warmup_epochs: 0.01          
 checkpoint:
   enabled: True
   dir: "trained_models"
   frequency: 10
   keep_prev: True
-  every_n_iter: 50000
+  every_n_iter: 0
 auto_resume:
   enabled: False
 knn_clb:
-  enabled: False  # Set to True if you want to use KNN evaluation during training
+  enabled: True  # Set to True if you want to use KNN evaluation during training
   dataset: "core50"  # Required even if disabled
   train_path: "/home/brothen/core50_arr.h5"
   val_path: "/home/brothen/core50_arr.h5"
@@ -69,14 +70,14 @@ knn_clb:
   batch_size: 64
   k: [10, 20, 50, 100]
   temperature: 0.07
+  train_backgrounds: ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]
+  val_backgrounds: ["s3", "s7", "s10"]
 # overwrite PL stuff
 max_epochs: 100
-devices: [0]  # Adjust based on available GPUs
+devices: [0,1,2]  # Adjust based on available GPUs
 sync_batchnorm: True
 accelerator: "gpu"
 strategy: "ddp"
 precision: 32
-# Disable validation
-no_validation: True
-limit_val_batches: 0
-num_sanity_val_steps: 0
+# Validation settings
+num_sanity_val_steps: 2

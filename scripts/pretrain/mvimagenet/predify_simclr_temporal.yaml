@@ -1,0 +1,106 @@
+defaults:
+  - _self_
+  - augmentations: none.yaml  # No augmentations for temporal-only learning
+  - wandb: private.yaml
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+name: "predify-simclr-temporal-mvimagenet-5pct-val"
+method: "predify_simclr"
+backbone:
+  name: "vgg16"
+
+method_kwargs:
+  # SimCLR parameters
+  proj_hidden_dim: 2048
+  proj_output_dim: 128
+  pred_hidden_dim: 2048  # Added to match Core50 config
+  temperature: 0.1  
+  
+  # Predictive coding parameters
+  timesteps: 4
+  pred_loss_weight: 1.0  # Higher weight since no augmentation
+  use_local_updates: false
+  
+  # True Predify dynamics (can be enabled for representation evolution)
+  use_true_predify: false  # Start with false for stability, can set to true like Core50
+  beta: [0.4, 0.3, 0.2, 0.1, 0.1]  # Feedforward coefficients
+  lambda_: [0.05, 0.05, 0.05, 0.05, 0.0]  # Feedback coefficients
+  alpha: [0.001, 0.001, 0.001, 0.001, 0.001]  # Error correction coefficients
+  true_predify_detach_errors: true  # For stability
+  true_predify_momentum: 0.9  # Smooth updates
+  
+  # PCoder gradient parameters
+  enable_pcoder_grads: true  # Enable gradients from PCoders to backbone
+  pcoder_grad_scale: [0.1, 0.1, 0.1, 0.1, 0.1]  # Individual scaling factors for PCoder1-5 gradients (aligned with Core50)
+  
+  # PCoder hyperparameters (should match beta/lambda for consistency)
+  ffm: [0.4, 0.3, 0.2, 0.1, 0.1]
+  fbm: [0.05, 0.05, 0.05, 0.05, 0.0]
+  erm: [0.001, 0.001, 0.001, 0.001, 0.001]
+  
+  # Temporal parameters (simplified since dataset handles pairing)
+  use_temporal_pairs: true  # Dataset already provides temporal pairs
+
+data:
+  dataset: temporal_mvimagenet
+  train_path: "/home/data/MVImageNet/data_all.h5"
+  val_path: "/home/data/MVImageNet/data_all.h5"  # Same as train for validation split
+  format: "h5"
+  num_workers: 4
+  dataset_kwargs:
+    metadata_path: "/home/data/MVImageNet/dataset_val_all3.parquet"
+    time_window: 10  # Larger window for MVImageNet (vs 5 for Core50)
+    val_split: 0.05  # 5% validation split
+    stratify_by_category: true  # Balanced class distribution
+    random_seed: 42  # Reproducible splits
+
+scheduler:
+  name: "warmup_cosine"
+  warmup_epochs: 5  # Aligned with Core50
+  min_lr: 0.0
+
+checkpoint:
+  enabled: True
+  dir: "trained_models"
+  frequency: 5  # Aligned with Core50
+  keep_prev: True
+  every_n_iter: 0  # Added to match Core50
+
+auto_resume:
+  enabled: False
+
+# Enable validation for monitoring (but still trains on all data)
+knn_clb:
+  enabled: True
+  dataset: "temporal_mvimagenet"  # Dataset-specific
+  train_path: "/home/data/MVImageNet/data_all.h5"
+  val_path: "/home/data/MVImageNet/data_all.h5"
+  num_workers: 4
+  batch_size: 64  # Aligned with Core50
+  k: [10, 20, 50, 100]  # Aligned with Core50
+  temperature: 0.07
+  metadata_path: "/home/data/MVImageNet/dataset_val_all3.parquet"
+  time_window: 10
+  val_split: 0.05
+  stratify_by_category: true
+  random_seed: 42
+
+optimizer:
+  name: "lars"
+  batch_size: 32  # Aligned with Core50 (can use larger batch without augmentation overhead)
+  lr: 0.12  # Aligned with Core50
+  classifier_lr: 3e-3
+  weight_decay: 1e-6
+
+# PyTorch Lightning settings (aligned with Core50)
+max_epochs: 200  # Aligned with Core50
+devices: [0, 1, 2]  # Use multiple GPUs like Core50 (adjust based on availability)
+sync_batchnorm: True
+accelerator: "gpu"
+strategy: "ddp_find_unused_parameters_true"  # Handle unused parameters from detached PCoders (aligned with Core50)
+precision: 32
+
+# Validation settings
+num_sanity_val_steps: 2  # Run 2 validation steps before training (aligned with Core50)
+check_val_every_n_epoch: 5  # Validate every 5 epochs for monitoring 

@@ -17,7 +17,9 @@
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-from typing import Dict, List, Sequence
+from typing import Dict, List, Sequence, Union, Tuple
+import numpy as np
+import cv2
 
 import torch
 
@@ -71,3 +73,146 @@ def weighted_mean(outputs: List[Dict], key: str, batch_size_key: str) -> float:
         n += out[batch_size_key]
     value = value / n
     return value.squeeze(0)
+
+
+def compute_shannon_entropy(img: np.ndarray) -> float:
+    """Compute Shannon entropy of an image.
+    
+    Args:
+        img (np.ndarray): Input image in RGB format.
+        
+    Returns:
+        float: Shannon entropy value.
+    """
+    # Convert to grayscale if RGB
+    if len(img.shape) == 3:
+        gray_img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    else:
+        gray_img = img
+    
+    # Compute histogram
+    hist = cv2.calcHist([gray_img], [0], None, [256], [0, 256])
+    hist = hist / hist.sum()
+    
+    # Compute entropy
+    entropy = -np.sum(hist * np.log2(hist + 1e-10))
+    
+    return float(entropy)
+
+
+def compute_edge_density(img: np.ndarray) -> float:
+    """Compute edge density of an image using Sobel filter.
+    
+    Args:
+        img (np.ndarray): Input image in RGB format.
+        
+    Returns:
+        float: Edge density value.
+    """
+    # Convert to grayscale if RGB
+    if len(img.shape) == 3:
+        gray_img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    else:
+        gray_img = img
+    
+    # Apply Sobel filter
+    sobel_x = cv2.Sobel(gray_img, cv2.CV_64F, 1, 0, ksize=3)
+    sobel_y = cv2.Sobel(gray_img, cv2.CV_64F, 0, 1, ksize=3)
+    
+    # Compute gradient magnitude
+    magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+    
+    # Compute mean gradient magnitude (edge density)
+    edge_density = np.mean(magnitude)
+    
+    return float(edge_density)
+
+
+def compute_motion_magnitude(img1: np.ndarray, img2: np.ndarray) -> float:
+    """Compute motion magnitude between two frames.
+    
+    Args:
+        img1 (np.ndarray): First frame in RGB format.
+        img2 (np.ndarray): Second frame in RGB format.
+        
+    Returns:
+        float: Motion magnitude value.
+    """
+    # Convert to grayscale if RGB
+    if len(img1.shape) == 3:
+        gray1 = cv2.cvtColor(img1, cv2.COLOR_RGB2GRAY)
+        gray2 = cv2.cvtColor(img2, cv2.COLOR_RGB2GRAY)
+    else:
+        gray1 = img1
+        gray2 = img2
+    
+    # Compute optical flow
+    flow = cv2.calcOpticalFlowFarneback(
+        gray1, gray2, None, 0.5, 3, 15, 3, 5, 1.2, 0
+    )
+    
+    # Compute magnitude of flow vectors
+    magnitude = np.sqrt(flow[..., 0]**2 + flow[..., 1]**2)
+    
+    # Compute mean magnitude
+    motion_magnitude = np.mean(magnitude)
+    
+    return float(motion_magnitude)
+
+
+def compute_structural_similarity(img1: np.ndarray, img2: np.ndarray) -> float:
+    """Compute structural similarity index (SSIM) between two frames.
+    
+    Args:
+        img1 (np.ndarray): First frame in RGB format.
+        img2 (np.ndarray): Second frame in RGB format.
+        
+    Returns:
+        float: SSIM value.
+    """
+    # Convert to grayscale if RGB
+    if len(img1.shape) == 3:
+        gray1 = cv2.cvtColor(img1, cv2.COLOR_RGB2GRAY)
+        gray2 = cv2.cvtColor(img2, cv2.COLOR_RGB2GRAY)
+    else:
+        gray1 = img1
+        gray2 = img2
+    
+    # Compute SSIM
+    ssim = cv2.compareSSIM(gray1, gray2)
+    
+    return float(ssim)
+
+
+def compute_color_histogram_distance(img1: np.ndarray, img2: np.ndarray) -> float:
+    """Compute color histogram distance between two frames.
+    
+    Args:
+        img1 (np.ndarray): First frame in RGB format.
+        img2 (np.ndarray): Second frame in RGB format.
+        
+    Returns:
+        float: Histogram distance value.
+    """
+    # Compute histograms for each channel
+    hist1 = []
+    hist2 = []
+    
+    for i in range(3):  # RGB channels
+        hist1.append(cv2.calcHist([img1], [i], None, [64], [0, 256]))
+        hist2.append(cv2.calcHist([img2], [i], None, [64], [0, 256]))
+    
+    # Normalize histograms
+    for i in range(3):
+        cv2.normalize(hist1[i], hist1[i], 0, 1, cv2.NORM_MINMAX)
+        cv2.normalize(hist2[i], hist2[i], 0, 1, cv2.NORM_MINMAX)
+    
+    # Compute histogram distance (Bhattacharyya distance)
+    dist = 0
+    for i in range(3):
+        dist += cv2.compareHist(hist1[i], hist2[i], cv2.HISTCMP_BHATTACHARYYA)
+    
+    # Average over channels
+    dist /= 3.0
+    
+    return float(dist)

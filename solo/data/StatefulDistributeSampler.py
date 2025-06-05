@@ -38,6 +38,16 @@ class DataPrepIterCheck(pl.LightningDataModule):
             print("Transforms:")
             print(transform)
 
+        # Filter dataset_kwargs to only pass appropriate parameters to the dataset constructor
+        dataset_kwargs = self.cfg.data.dataset_kwargs.copy() if hasattr(self.cfg.data, 'dataset_kwargs') else {}
+        
+        # For temporal_core50, remove val_backgrounds from train dataset parameters
+        if self.cfg.data.dataset == "temporal_core50" and "val_backgrounds" in dataset_kwargs:
+            # Create a copy without val_backgrounds
+            train_kwargs = {k: v for k, v in dataset_kwargs.items() if k != "val_backgrounds"}
+        else:
+            train_kwargs = dataset_kwargs
+
         self.train_dataset = prepare_datasets(
             self.cfg.data.dataset,
             transform,
@@ -45,15 +55,115 @@ class DataPrepIterCheck(pl.LightningDataModule):
             data_format=self.cfg.data.format,
             no_labels=self.cfg.data.no_labels,
             data_fraction=self.cfg.data.fraction,
-            **self.cfg.data.dataset_kwargs
+            **train_kwargs
         )
 
+        # For temporal_mvimagenet, also create validation dataset for monitoring
+        if self.cfg.data.dataset == "temporal_mvimagenet":
+            self.val_dataset = self._create_mvimagenet_val_dataset(transform)
+
+    def _create_mvimagenet_val_dataset(self, transform):
+        """Create validation dataset for temporal_mvimagenet with balanced class distribution."""
+        from solo.data.custom.temporal_mvimagnet2 import TemporalMVImageNet
+        
+        # Extract dataset-specific kwargs
+        dataset_kwargs = self.cfg.data.dataset_kwargs.copy() if hasattr(self.cfg.data, 'dataset_kwargs') else {}
+        metadata_path = dataset_kwargs.get("metadata_path", "/home/data/MVImageNet/dataset_val_all3.parquet")
+        time_window = dataset_kwargs.get("time_window", 15)
+        val_split = dataset_kwargs.get("val_split", 0.05)
+        stratify_by_category = dataset_kwargs.get("stratify_by_category", True)
+        random_seed = dataset_kwargs.get("random_seed", 42)
+        
+        # Create validation dataset from the same source as training
+        val_dataset = TemporalMVImageNet(
+            h5_path=self.cfg.data.train_path,
+            metadata_path=metadata_path,
+            transform=transform,
+            time_window=time_window,
+            split='val',
+            val_split=val_split,
+            stratify_by_category=stratify_by_category,
+            random_seed=random_seed,
+        )
+        
+        # Wrap with index for consistency
+        from solo.data.pretrain_dataloader import dataset_with_index
+        return dataset_with_index(type(val_dataset))(
+            h5_path=self.cfg.data.train_path,
+            metadata_path=metadata_path,
+            transform=transform,
+            time_window=time_window,
+            split='val',
+            val_split=val_split,
+            stratify_by_category=stratify_by_category,
+            random_seed=random_seed,
+        )
 
     def val_dataloader(self):
         if self.cfg.data.dataset == "custom" and (self.cfg.data.no_labels or self.cfg.data.val_path is None):
             val_loader = None
         elif self.cfg.data.dataset in ["imagenet100", "imagenet", "ego4d"] and self.cfg.data.val_path is None:
             val_loader = None
+        elif self.cfg.data.dataset == "temporal_mvimagenet" and hasattr(self, 'val_dataset'):
+            # Use the validation split created in setup
+            from torch.utils.data.distributed import DistributedSampler
+            
+            sampler = DistributedSampler(self.val_dataset, shuffle=False)
+            val_loader = DataLoader(
+                self.val_dataset,
+                batch_size=self.cfg.optimizer.batch_size,
+                num_workers=self.cfg.data.num_workers,
+                pin_memory=True,
+                sampler=sampler,
+            )
+        elif self.cfg.data.dataset == "temporal_core50" and self.cfg.data.val_path is not None:
+            # For temporal_core50, create a validation dataset with the val_backgrounds
+            from solo.data.custom.temporal_core50 import TemporalCore50
+            from torchvision import transforms
+            
+            # Create a transform wrapper that can handle paired images
+            class PairedImageTransform:
+                def __init__(self, transform):
+                    self.transform = transform
+                
+                def __call__(self, img, paired_img=None):
+                    # Only transform the first image and ignore the paired image
+                    return self.transform(img)
+            
+            # Create a basic transform for validation
+            base_transform = transforms.Compose([
+                transforms.Resize(224),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], 
+                    std=[0.229, 0.224, 0.225]
+                )
+            ])
+            
+            # Wrap it to handle paired images
+            val_transform = PairedImageTransform(base_transform)
+            
+            # Create dataset with validation backgrounds
+            # Don't use dataset_with_index for validation - we don't need indices
+            val_dataset = TemporalCore50(
+                h5_path=self.cfg.data.val_path,
+                transform=val_transform,
+                time_window=self.cfg.data.dataset_kwargs.get("time_window", 15),
+                backgrounds=self.cfg.data.dataset_kwargs.get("val_backgrounds", None)
+            )
+            
+            # Create dataloader
+            from torch.utils.data import DataLoader
+            from torch.utils.data.distributed import DistributedSampler
+            
+            sampler = DistributedSampler(val_dataset, shuffle=False)
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=self.cfg.optimizer.batch_size,
+                num_workers=self.cfg.data.num_workers,
+                pin_memory=True,
+                sampler=sampler,
+            )
         else:
             val_data_format = self.cfg.data.format
             _, val_loader = prepare_data_classification(

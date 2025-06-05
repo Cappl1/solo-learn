@@ -203,11 +203,13 @@ class MAE(BaseMethod):
         ]
         return super().learnable_params + extra_learnable_params
 
-    def forward(self, X: torch.Tensor) -> Dict[str, Any]:
+    def forward(self, X: torch.Tensor, compute_metrics: bool = False) -> Dict[str, Any]:
         """Performs forward pass of the online backbone, projector and predictor.
 
         Args:
             X (torch.Tensor): batch of images in tensor format.
+            compute_metrics (bool): If True, compute and return mask and predictions,
+                                    even during evaluation.
 
         Returns:
             Dict[str, Any]: a dict containing the outputs of the parent and the projected features.
@@ -218,15 +220,35 @@ class MAE(BaseMethod):
             X = X.to(memory_format=torch.channels_last)
 
         out = {}
-        if self.training:
+        # Compute mask and predictions if training or if explicitly requested for metrics
+        if self.training or compute_metrics:
+            # Assuming backbone forward can handle being called without mask_ratio during eval
+            # If not, this might need adjustment. For now, we always pass mask_ratio
+            # when we need mask/pred outputs.
             feats, patch_feats, mask, ids_restore = self.backbone(X, self.mask_ratio)
             pred = self.decoder(patch_feats, ids_restore)
             out.update({"mask": mask, "pred": pred})
-        else:
+        else: # Standard evaluation pass (no mask/pred needed)
             feats = self.backbone(X)
 
-        logits = self.classifier(feats.detach())
-        out.update({"logits": logits, "feats": feats})
+        # Always compute features and logits (if classifier exists)
+        # If mask/pred were computed above, feats are already available.
+        if not (self.training or compute_metrics):
+             # Recompute features without masking if not done above
+             # Note: This assumes backbone() call without mask_ratio returns features.
+             feats = self.backbone(X)
+        elif 'feats' not in out: # Get feats from the masked forward pass if available
+             feats, _, _, _ = self.backbone(X, self.mask_ratio) # Re-calling might be inefficient
+             # TODO: Check if backbone(X, mask_ratio) returns feats directly
+
+        # Check if classifier exists before using it (using BaseMethod's check)
+        if not self.cfg.no_validation:
+             logits = self.classifier(feats.detach())
+             out.update({"logits": logits})
+
+        # Ensure features are always included in the output
+        out.update({"feats": feats})
+
         return out
 
     def training_step(self, batch: Sequence[Any], batch_idx: int) -> torch.Tensor:

@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 import omegaconf
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from solo.losses.mocov3 import mocov3_loss_func
 from solo.methods.base import BaseMomentumMethod
 from solo.utils.momentum import initialize_momentum_params
@@ -40,15 +41,74 @@ class MoCoV3(BaseMomentumMethod):
         """
 
         super().__init__(cfg)
+        
+        self.use_projected_features_for_knn = \
+            "efficientnet" in self.backbone_name or \
+            "vgg" in self.backbone_name
 
         self.temperature: float = cfg.method_kwargs.temperature
 
         proj_hidden_dim: int = cfg.method_kwargs.proj_hidden_dim
         proj_output_dim: int = cfg.method_kwargs.proj_output_dim
         pred_hidden_dim: int = cfg.method_kwargs.pred_hidden_dim
+        
+        # Register gradient validation hooks to prevent None gradient errors
+        #self._register_gradient_hooks()
 
-        if "resnet" in self.backbone_name:
-            # projector
+        # EfficientNet-specific projector architecture for better contrastive learning
+        if "efficientnet" in self.backbone_name:
+            # DEBUGGING: Use EXACT same architecture as ResNet to isolate the issue
+            print(f"[DEBUG] Using ResNet architecture for EfficientNet: {self.features_dim} -> {proj_hidden_dim} -> {proj_output_dim}")
+            
+            # Use EXACT same architecture as ResNet
+            self.projector = self._build_mlp(
+                2,
+                self.features_dim,
+                proj_hidden_dim,
+                proj_output_dim,
+            )
+            # momentum projector
+            self.momentum_projector = self._build_mlp(
+                2,
+                self.features_dim,
+                proj_hidden_dim,
+                proj_output_dim,
+            )
+
+            # predictor - same as ResNet
+            self.predictor = self._build_mlp(
+                2,
+                proj_output_dim,
+                pred_hidden_dim,
+                proj_output_dim,
+                last_bn=False,
+            )
+        elif "resnet" in self.backbone_name:
+            # Standard MoCo v3 projector for ResNet
+            self.projector = self._build_mlp(
+                2,
+                self.features_dim,
+                proj_hidden_dim,
+                proj_output_dim,
+            )
+            # momentum projector
+            self.momentum_projector = self._build_mlp(
+                2,
+                self.features_dim,
+                proj_hidden_dim,
+                proj_output_dim,
+            )
+
+            # predictor
+            self.predictor = self._build_mlp(
+                2,
+                proj_output_dim,
+                pred_hidden_dim,
+                proj_output_dim,
+                last_bn=False,
+            )
+        elif "vgg" in self.backbone_name:
+            # VGG uses the same architecture as ResNet for projector
             self.projector = self._build_mlp(
                 2,
                 self.features_dim,
@@ -114,7 +174,20 @@ class MoCoV3(BaseMomentumMethod):
                 mlp.append(nn.BatchNorm1d(dim2, affine=False))
 
         return nn.Sequential(*mlp)
-
+    """
+    def _register_gradient_hooks(self):
+        Register gradient hooks to handle None gradients gracefully.
+        def gradient_hook(grad):
+            if grad is None:
+                print("Warning: None gradient encountered, replacing with zeros")
+                return torch.zeros_like(grad) if grad is not None else None
+            return grad
+        
+        # Register hooks for all parameters
+        for name, param in self.named_parameters():
+            if param.requires_grad:
+                param.register_hook(gradient_hook)
+    """
     @staticmethod
     def add_and_assert_specific_cfg(cfg: omegaconf.DictConfig) -> omegaconf.DictConfig:
         """Adds method specific default values/checks for config.
@@ -171,9 +244,18 @@ class MoCoV3(BaseMomentumMethod):
         """
 
         out = super().forward(X)
-        z = self.projector(out["feats"])
-        q = self.predictor(z)
-        out.update({"q": q, "z": z})
+        projected_feats = self.projector(out["feats"])
+        q = self.predictor(projected_feats)
+        
+        # For KNN evaluation with specific backbones (EfficientNet, VGG),
+        # use the lower-dimensional projected features instead of raw backbone features.
+        # This is done during validation/testing (not self.training).
+        if self.use_projected_features_for_knn and not self.training:
+            # The BaseMethod.validation_step uses out["feats"] for KNN.
+            # So, we overwrite it here with the projected features.
+            out["feats"] = projected_feats
+        
+        out.update({"q": q, "z": projected_feats}) # z is also the projected_feats
         return out
 
     @torch.no_grad()
@@ -192,7 +274,10 @@ class MoCoV3(BaseMomentumMethod):
         k = self.momentum_projector(out["feats"])
         out.update({"k": k})
         return out
+    
+    
 
+    
     def training_step(self, batch: Sequence[Any], batch_idx: int) -> torch.Tensor:
         """Training step for MoCo V3 reusing BaseMethod training step.
 
@@ -221,3 +306,4 @@ class MoCoV3(BaseMomentumMethod):
         self.log_dict(metrics, on_epoch=True, on_step=True, sync_dist=True)
 
         return contrastive_loss + class_loss
+   

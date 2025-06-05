@@ -39,33 +39,45 @@ from solo.methods.vicreg import VICReg
 from solo.methods.wmse import WMSE
 from solo.methods.all4one import All4One
 from solo.methods.curriculum_mocov3 import CurriculumMoCoV3
-
-METHODS = {
-    # base classes
-    "base": BaseMethod,
-    "linear": LinearModel,
-    # methods
-    "barlow_twins": BarlowTwins,
-    "byol": BYOL,
-    "deepclusterv2": DeepClusterV2,
-    "dino": DINO,
-    "mae": MAE,
-    "mocov2plus": MoCoV2Plus,
-    "mocov3": MoCoV3,
-    "curriculum_mocov3": CurriculumMoCoV3,
-    "nnbyol": NNBYOL,
-    "nnclr": NNCLR,
-    "nnsiam": NNSiam,
-    "ressl": ReSSL,
-    "simclr": SimCLR,
-    "simsiam": SimSiam,
-    "supcon": SupCon,
-    "swav": SwAV,
-    "vibcreg": VIbCReg,
-    "vicreg": VICReg,
-    "wmse": WMSE,
-    "all4one": All4One,
-}
+from solo.methods.selective_curriculum_mocov3 import SelectiveJEPACurriculumMoCoV3
+from solo.methods.predify_moco import PredifyMoCo
+from solo.methods.predify_simclr import PredifySimCLR
+try:
+    from solo.methods.temporal_jepa import TemporalJEPA
+    from solo.methods.temporal_mae import TemporalMAE
+    METHODS = {
+        # base classes
+        "base": BaseMethod,
+        "linear": LinearModel,
+        # methods
+        "barlow_twins": BarlowTwins,
+        "byol": BYOL,
+        "deepclusterv2": DeepClusterV2,
+        "dino": DINO,
+        "mae": MAE,
+        "mocov2plus": MoCoV2Plus,
+        "mocov3": MoCoV3,
+        "curriculum_mocov3": CurriculumMoCoV3,
+        "selective_curriculum_mocov3": SelectiveJEPACurriculumMoCoV3,
+        "predify_moco": PredifyMoCo,
+        "predify_simclr": PredifySimCLR,
+        "nnbyol": NNBYOL,
+        "nnclr": NNCLR,
+        "nnsiam": NNSiam,
+        "ressl": ReSSL,
+        "simclr": SimCLR,
+        "simsiam": SimSiam,
+        "supcon": SupCon,
+        "swav": SwAV,
+        "vibcreg": VIbCReg,
+        "vicreg": VICReg,
+        "wmse": WMSE,
+        "all4one": All4One,
+        "temporal_jepa": TemporalJEPA, 
+        "temporal_mae": TemporalMAE,
+    }
+except ImportError:
+    pass
 __all__ = [
     "BarlowTwins",
     "BYOL",
@@ -76,6 +88,8 @@ __all__ = [
     "LinearModel",
     "MoCoV2Plus",
     "MoCoV3",
+    "PredifyMoCo",
+    "PredifySimCLR",
     "NNBYOL",
     "NNCLR",
     "NNSiam",
@@ -88,4 +102,6 @@ __all__ = [
     "VICReg",
     "WMSE",
     "All4One",
+    "TemporalJEPA", 
+    "TemporalMAE",
 ]

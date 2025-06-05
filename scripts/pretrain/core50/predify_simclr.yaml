@@ -1,0 +1,103 @@
+defaults:
+  - _self_
+  - augmentations: none.yaml  # No augmentations!
+  - wandb: private.yaml
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+name: "predify-simclr-temporal-no-aug-from-scratch-true-predify-pretrained"
+method: "predify_simclr"
+backbone:
+  name: "vgg16"
+  #kwargs:
+  #  pretrained: false
+
+method_kwargs:
+  # SimCLR parameters
+  proj_hidden_dim: 2048
+  proj_output_dim: 128
+  pred_hidden_dim: 2048
+  temperature: 0.1  
+  
+  # Predictive coding parameters
+  timesteps: 4
+  pred_loss_weight: 1.0  # Higher weight since no augmentation
+  use_local_updates: true
+  
+  # True Predify dynamics (set to true to enable representation evolution)
+  use_true_predify: true  # Set to true to use true predictive dynamics
+  beta: [0.4, 0.3, 0.2, 0.1, 0.1]  # Feedforward coefficients
+  lambda_: [0.05, 0.05, 0.05, 0.05, 0.0]  # Feedback coefficients
+  alpha: [0.001, 0.001, 0.001, 0.001, 0.001]  # Error correction coefficients
+  true_predify_detach_errors: true  # For stability
+  true_predify_momentum: 0.9  # Smooth updates
+  
+  # PCoder gradient parameters
+  enable_pcoder_grads: true  # Enable gradients from PCoders to backbone
+  pcoder_grad_scale: [0.1, 0.1, 0.1, 0.1, 0.1]  # Individual scaling factors for PCoder1-5 gradients
+  
+  # PCoder hyperparameters (should match beta/lambda for consistency)
+  ffm: [0.4, 0.3, 0.2, 0.1, 0.1]
+  fbm: [0.05, 0.05, 0.05, 0.05, 0.0]
+  erm: [0.001, 0.001, 0.001, 0.001, 0.001]
+  
+  # Temporal parameters (simplified since dataset handles pairing)
+  use_temporal_pairs: true  # Dataset already provides temporal pairs
+
+data:
+  dataset: temporal_core50
+  train_path: "/home/brothen/core50_arr.h5"
+  val_path: "/home/brothen/core50_arr.h5"
+  format: "h5"
+  num_workers: 4
+  dataset_kwargs:
+    backgrounds: ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]
+    val_backgrounds: ["s3", "s7", "s10"]
+    time_window: 5  # Smaller window for closer temporal neighbors
+
+scheduler:
+  name: "warmup_cosine"
+  warmup_epochs: 5
+  min_lr: 0.0
+
+checkpoint:
+  enabled: True
+  dir: "trained_models"
+  frequency: 10
+  keep_prev: True
+  every_n_iter: 0
+
+auto_resume:
+  enabled: False
+
+
+knn_clb:
+  enabled: True  # Disable KNN evaluation during training to prevent OOM
+  dataset: "core50"  # Required even if disabled
+  train_path: "/home/brothen/core50_arr.h5"
+  val_path: "/home/brothen/core50_arr.h5"
+  num_workers: 4
+  batch_size: 64
+  k: [10, 20, 50, 100]
+  temperature: 0.07
+  train_backgrounds: ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]
+  val_backgrounds: ["s3", "s7", "s10"]
+
+optimizer:
+  name: "lars"
+  batch_size: 32  # Can use larger batch without augmentation overhead
+  lr: 0.12
+  classifier_lr: 3e-3
+  weight_decay: 1e-6
+
+# overwrite PL stuff
+max_epochs: 200
+devices: [0, 1, 2]  # Use GPUs 1, 2, and 3 (avoiding GPU 0)
+sync_batchnorm: True
+accelerator: "gpu"
+strategy: "ddp_find_unused_parameters_true"  # Handle unused parameters from detached PCoders
+precision: 32
+#limit_train_batches: 5  # Only run 5 batches for debugging
+#limit_val_batches: 5  # Only run 5 batches for debugging
+# Validation settings
+num_sanity_val_steps: 2  # Run 2 validation steps before training 

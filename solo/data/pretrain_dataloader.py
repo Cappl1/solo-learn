@@ -36,6 +36,8 @@ from solo.data.custom.imagenet import ImgnetDataset
 from solo.data.custom.tinyimgnet import TinyDataset
 from solo.data.custom.core50 import Core50
 from solo.data.custom.temporal_core50 import TemporalCore50
+from solo.data.custom.selective_temporal_core50 import SelectiveTemporalCore50
+from solo.data.custom.temporal_mvimagnet2 import TemporalMVImageNet
 
 try:
     from solo.data.h5_dataset import H5Dataset
@@ -360,6 +362,18 @@ def prepare_datasets(
     elif dataset == "temporal_core50":
         train_dataset = dataset_with_index(TemporalCore50)(
             train_data_path, transform=transform, **dataset_kwargs
+        )
+    elif dataset == "selective_temporal_core50":
+        train_dataset = dataset_with_index(SelectiveTemporalCore50)(
+            train_data_path, transform=transform, **dataset_kwargs
+        )
+    elif dataset == "temporal_mvimagenet":
+        from solo.data.custom.temporal_mvimagnet2 import TemporalMVImageNet
+        
+        train_dataset = dataset_with_index(TemporalMVImageNet)(
+            h5_path=train_data_path,
+            transform=transform,
+            **dataset_kwargs
         )
     elif dataset == "tiny":
         train_dataset = dataset_with_index(TinyDataset)(train_data_path,split="train", transform=transform)

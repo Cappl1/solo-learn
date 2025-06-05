@@ -298,6 +298,9 @@ def prepare_transforms(dataset: str) -> Tuple[nn.Module, nn.Module]:
         'core50': core50_pipeline,
         'core50_bg': core50_pipeline,
         'temporal_core50': imagenet_pipeline, #verify please
+        'selective_temporal_core50': imagenet_pipeline, # use same pipeline as temporal_core50
+        'core50_categories': core50_pipeline, # Added entry for category evaluation
+        'temporal_mvimagenet': imagenet_pipeline,  # Add temporal MVImageNet pipeline
         "custom": custom_pipeline,
         'DTD': imagenet_pipeline,
         'Flowers102': imagenet_pipeline,
@@ -370,10 +373,10 @@ def prepare_datasets(
 
     assert dataset in [
         "cifar10", "cifar100", "stl10", "imagenet", "imagenet100", "custom", "imagenet2", "imagenet2_100", "ego4d",
-        "tiny", "cifar10_224", "cifar100_224", "imagenet_42", "imagenet100_42", 'core50','temporal_core50', "DTD", 'Flowers102',
-        'FGVCAircraft', 'Food101', 'OxfordIIITPet', 'Places365', 'StanfordCars', "STL10","STL10_224", "Places365_h5", "SUN397",
-        "Caltech101", "imagenet1pct_42", "imagenet10pct_42", "toybox", 'core50_bg', "feat", "COIL100", "STL10_FG_224",
-        "STL10_FG"
+        "tiny", "cifar10_224", "cifar100_224", "imagenet_42", "imagenet100_42", 'core50','temporal_core50', 
+        'selective_temporal_core50', "core50_categories", "temporal_mvimagenet", "DTD", 'Flowers102', 'FGVCAircraft', 'Food101', 'OxfordIIITPet', 'Places365',
+        'StanfordCars', "STL10","STL10_224", "Places365_h5", "SUN397", "Caltech101", "imagenet1pct_42", 
+        "imagenet10pct_42", "toybox", 'core50_bg', "feat", "COIL100", "STL10_FG_224", "STL10_FG"
     ]
 
     if dataset in ["cifar10", "cifar100", "cifar10_224", "cifar100_224"]:
@@ -470,12 +473,42 @@ def prepare_datasets(
         else:
             train_dataset = ImageFolder(train_data_path, T_train)
             val_dataset = ImageFolder(val_data_path, T_val)
-    elif dataset == "core50" or "temporal_core50":
+    elif dataset in ["core50", "temporal_core50", "core50_categories"]:
+        
+        # Extract specific arguments Core50 expects
+        train_bgs = dataset_kwargs.get("train_backgrounds", None)
+        val_bgs = dataset_kwargs.get("val_backgrounds", None)
+        use_cats = dataset_kwargs.get("use_categories", False)
         
         train_dataset = Core50(h5_path=train_data_path, transform=T_train,
-                            backgrounds=dataset_kwargs.get("train_backgrounds", None))
+                            backgrounds=train_bgs,
+                            use_categories=use_cats)
         val_dataset = Core50(h5_path=val_data_path, transform=T_val,
-                          backgrounds=dataset_kwargs.get("val_backgrounds", None))
+                          backgrounds=val_bgs,
+                          use_categories=use_cats)
+    elif dataset == "selective_temporal_core50":
+        # Special handling for selective curriculum dataset with validation mode
+        from solo.data.custom.selective_temporal_core50 import SelectiveTemporalCore50
+        
+        train_dataset = SelectiveTemporalCore50(
+            h5_path=train_data_path, 
+            transform=T_train,
+            backgrounds=dataset_kwargs.get("train_backgrounds", None),
+            val_backgrounds=dataset_kwargs.get("val_backgrounds", None),
+            time_window=dataset_kwargs.get("time_window", 15),
+            num_candidates=dataset_kwargs.get("num_candidates", 8),
+            is_validation=False
+        )
+        
+        val_dataset = SelectiveTemporalCore50(
+            h5_path=val_data_path, 
+            transform=T_val,
+            backgrounds=dataset_kwargs.get("val_backgrounds", None),
+            val_backgrounds=None,  # Not needed for validation
+            time_window=dataset_kwargs.get("time_window", 15),
+            num_candidates=dataset_kwargs.get("num_candidates", 8),
+            is_validation=True  # Set validation mode
+        )
     elif dataset == 'core50_bg':
         train_dataset = Core50ForBGClassification(h5_path=Path(train_data_path) / 'core50_350x350/core50_arr.h5',
                                                   split="train", transform=T_train)
@@ -491,6 +524,31 @@ def prepare_datasets(
         mode = ""
         train_dataset = ImageNetS(Path(train_data_path) / 'ImageNet-S/ImageNetS919/training', transform=T_train, mode=mode)
         val_dataset = ImageNetS(Path(val_data_path) / 'ImageNet-S/ImageNetS919/validation', transform=T_val, mode=mode)
+    elif dataset == "temporal_mvimagenet":
+        # Special handling for temporal MVImageNet dataset
+        from solo.data.custom.temporal_mvimagnet2 import TemporalMVImageNet
+        
+        train_dataset = TemporalMVImageNet(
+            h5_path=train_data_path,
+            metadata_path=dataset_kwargs.get("metadata_path"),
+            transform=T_train,
+            time_window=dataset_kwargs.get("time_window", 10),
+            split='train',
+            val_split=dataset_kwargs.get("val_split", 0.05),
+            stratify_by_category=dataset_kwargs.get("stratify_by_category", True),
+            random_seed=dataset_kwargs.get("random_seed", 42)
+        )
+        
+        val_dataset = TemporalMVImageNet(
+            h5_path=val_data_path,
+            metadata_path=dataset_kwargs.get("metadata_path"),
+            transform=T_val,
+            time_window=dataset_kwargs.get("time_window", 10),
+            split='val',
+            val_split=dataset_kwargs.get("val_split", 0.05),
+            stratify_by_category=dataset_kwargs.get("stratify_by_category", True),
+            random_seed=dataset_kwargs.get("random_seed", 42)
+        )
     if data_fraction > 0:
         assert data_fraction < 1, "Only use data_fraction for values smaller than 1."
         data = train_dataset.samples
@@ -551,6 +609,7 @@ def prepare_data(
         download: bool = True,
         data_fraction: float = -1.0,
         auto_augment: bool = False,
+        use_categories: bool = False,
         **dataset_kwargs
 ) -> Tuple[DataLoader, DataLoader]:
     """Prepares transformations, creates dataset objects and wraps them in dataloaders.
@@ -569,6 +628,7 @@ def prepare_data(
             Defaults to -1.0.
         auto_augment (bool, optional): use auto augment following timm.data.create_transform.
             Defaults to False.
+        use_categories (bool, optional): Whether to use category labels for core50 dataset. Defaults to False.
 
     Returns:
         Tuple[DataLoader, DataLoader]: prepared training and validation dataloader.
@@ -589,6 +649,9 @@ def prepare_data(
             std=IMAGENET_DEFAULT_STD,
         )
   
+    # Make sure use_categories is passed through
+    dataset_kwargs['use_categories'] = use_categories
+    
     train_dataset, val_dataset = prepare_datasets(
         dataset,
         T_train,

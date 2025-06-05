@@ -33,6 +33,7 @@ from solo.backbones import (
     convnext_large,
     convnext_small,
     convnext_tiny,
+    efficientnet_b0,
     poolformer_m36,
     poolformer_m48,
     poolformer_s12,
@@ -50,6 +51,7 @@ from solo.backbones import (
     vit_tiny,
     wide_resnet28w2,
     wide_resnet28w8,
+    vgg16,
 )
 from solo.utils.knn import WeightedKNNClassifier
 from solo.utils.lars import LARS
@@ -74,10 +76,13 @@ class BaseMethod(pl.LightningModule):
     _BACKBONES = {
         "resnet18": resnet18,
         "resnet50": resnet50,
+        "efficientnet_b0": efficientnet_b0,
         "vit_tiny": vit_tiny,
         "vit_small": vit_small,
         "vit_base": vit_base,
         "vit_large": vit_large,
+        "vit_huge": vit_large,
+        "vit_base_patch16": vit_base,
         "swin_tiny": swin_tiny,
         "swin_small": swin_small,
         "swin_base": swin_base,
@@ -93,6 +98,7 @@ class BaseMethod(pl.LightningModule):
         "convnext_large": convnext_large,
         "wide_resnet28w2": wide_resnet28w2,
         "wide_resnet28w8": wide_resnet28w8,
+        "vgg16": vgg16,
     }
     _OPTIMIZERS = {
         "sgd": torch.optim.SGD,
@@ -107,6 +113,35 @@ class BaseMethod(pl.LightningModule):
         "exponential",
         "none",
     ]
+
+    # Add vit_base_patch16 mapping
+    _SUPPORTED_BACKBONES = {
+        "resnet18": resnet18,
+        "resnet50": resnet50,
+        "efficientnet_b0": efficientnet_b0,
+        "vit_tiny": vit_tiny,
+        "vit_small": vit_small,
+        "vit_base": vit_base,
+        "vit_large": vit_large,
+        "vit_huge": vit_large, # Typically uses large weights/config
+        "vit_base_patch16": vit_base, # Map vit_base_patch16 to vit_base constructor
+        "swin_tiny": swin_tiny,
+        "swin_small": swin_small,
+        "swin_base": swin_base,
+        "swin_large": swin_large,
+        "poolformer_s12": poolformer_s12,
+        "poolformer_s24": poolformer_s24,
+        "poolformer_s36": poolformer_s36,
+        "poolformer_m36": poolformer_m36,
+        "poolformer_m48": poolformer_m48,
+        "convnext_tiny": convnext_tiny,
+        "convnext_small": convnext_small,
+        "convnext_base": convnext_base,
+        "convnext_large": convnext_large,
+        "wide_resnet28w2": wide_resnet28w2,
+        "wide_resnet28w8": wide_resnet28w8,
+        "vgg16": vgg16,
+    }
 
     def __init__(self, cfg: omegaconf.DictConfig):
         """Base model that implements all basic operations for all self-supervised methods.
@@ -201,6 +236,14 @@ class BaseMethod(pl.LightningModule):
                     3, 64, kernel_size=3, stride=1, padding=2, bias=False
                 )
                 self.backbone.maxpool = nn.Identity()
+        elif "efficientnet" in self.backbone_name:
+            self.features_dim: int = self.backbone.num_features
+            if hasattr(self.backbone, 'classifier'):
+                self.backbone.classifier = nn.Identity()
+        elif "vgg" in self.backbone_name:
+            self.features_dim: int = self.backbone.num_features
+            # VGG models already have classifier removed via our wrapper
+            # The wrapper already sets num_features and removes classifier
         else:
             self.features_dim: int = self.backbone.num_features
         ##############################
@@ -473,7 +516,7 @@ class BaseMethod(pl.LightningModule):
 
         if not self.cfg.no_validation:
             logits = out["logits"]
-            loss = F.cross_entropy(logits, targets, ignore_index=-1)
+            loss = F.cross_entropy(logits, targets.long(), ignore_index=-1)
             # handle when the number of classes is smaller than 5
             top_k_max = min(5, logits.size(1))
             acc1, acc5 = accuracy_at_k(logits, targets, top_k=(1, top_k_max))
@@ -660,6 +703,13 @@ class BaseMomentumMethod(BaseMethod):
                     3, 64, kernel_size=3, stride=1, padding=2, bias=False
                 )
                 self.momentum_backbone.maxpool = nn.Identity()
+        elif "efficientnet" in self.backbone_name:
+            if hasattr(self.momentum_backbone, 'classifier'):
+                self.momentum_backbone.classifier = nn.Identity()
+        elif "vgg" in self.backbone_name:
+            # VGG models already have classifier removed via our wrapper
+            # No additional modifications needed for VGG momentum backbone
+            pass
 
         initialize_momentum_params(self.backbone, self.momentum_backbone)
 
@@ -763,7 +813,7 @@ class BaseMomentumMethod(BaseMethod):
             feats = out["feats"]
             logits = self.momentum_classifier(feats)
 
-            loss = F.cross_entropy(logits, targets, ignore_index=-1)
+            loss = F.cross_entropy(logits, targets.long(), ignore_index=-1)
             acc1, acc5 = accuracy_at_k(logits, targets, top_k=(1, 5))
             out.update({"logits": logits, "loss": loss, "acc1": acc1, "acc5": acc5})
 
