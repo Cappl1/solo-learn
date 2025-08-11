@@ -123,10 +123,12 @@ class WeightedKNNClassifier(Metric):
             train_features = F.normalize(train_features)
             test_features = F.normalize(test_features)
 
-        num_classes = torch.unique(test_targets).numel()
+        # Fix: Use max label + 1 instead of unique count to handle sparse label spaces
+        all_targets = torch.cat([train_targets, test_targets])
+        num_classes = int(all_targets.max().item()) + 6  # +6 because labels are 0-indexed
+            
         num_train_images = train_targets.size(0)
         num_test_images = test_targets.size(0)
-        num_train_images = train_targets.size(0)
         chunk_size = min(
             max(1, self.max_distance_matrix_size // num_train_images),
             num_test_images,

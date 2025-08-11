@@ -5,7 +5,7 @@ defaults:
   - override hydra/hydra_logging: disabled
   - override hydra/job_logging: disabled
 
-name: "predify-simclr-temporal-mvimagenet-5pct-val"
+name: "predify-simclr-temporal-mvimagenet-separate-splits"
 method: "predify_simclr"
 backbone:
   name: "vgg16"
@@ -31,7 +31,7 @@ method_kwargs:
   true_predify_momentum: 0.9  # Smooth updates
   
   # PCoder gradient parameters
-  enable_pcoder_grads: true  # Enable gradients from PCoders to backbone
+  enable_pcoder_grads: false  # Enable gradients from PCoders to backbone
   pcoder_grad_scale: [0.1, 0.1, 0.1, 0.1, 0.1]  # Individual scaling factors for PCoder1-5 gradients (aligned with Core50)
   
   # PCoder hyperparameters (should match beta/lambda for consistency)
@@ -44,16 +44,19 @@ method_kwargs:
 
 data:
   dataset: temporal_mvimagenet
-  train_path: "/home/data/MVImageNet/data_all.h5"
-  val_path: "/home/data/MVImageNet/data_all.h5"  # Same as train for validation split
+  train_path: "/home/data/MVImageNet/"
+  val_path: "/home/data/MVImageNet/"  # Same directory for both train/val
   format: "h5"
   num_workers: 4
   dataset_kwargs:
-    metadata_path: "/home/data/MVImageNet/dataset_val_all3.parquet"
+    # Train dataset uses train parquet file
+    train_metadata_path: "/home/brothen/solo-learn/mvimagenet_train.parquet"
+    # Val dataset uses val parquet file
+    val_metadata_path: "/home/brothen/solo-learn/mvimagenet_val.parquet"
     time_window: 10  # Larger window for MVImageNet (vs 5 for Core50)
-    val_split: 0.05  # 5% validation split
-    stratify_by_category: true  # Balanced class distribution
-    random_seed: 42  # Reproducible splits
+
+# Debug settings
+debug_augmentations: false
 
 scheduler:
   name: "warmup_cosine"
@@ -63,28 +66,33 @@ scheduler:
 checkpoint:
   enabled: True
   dir: "trained_models"
-  frequency: 5  # Aligned with Core50
+  frequency: 1  # Keep as 1 since we're using step-based checkpointing
   keep_prev: True
-  every_n_iter: 0  # Added to match Core50
+  every_n_iter: 5400  # Save every 5400 steps (approximately 5 checkpoints per epoch)
+  save_last: True  # Save final checkpoint
 
 auto_resume:
   enabled: False
 
-# Enable validation for monitoring (but still trains on all data)
+# Enable validation for monitoring (similar to Core50)
 knn_clb:
-  enabled: True
-  dataset: "temporal_mvimagenet"  # Dataset-specific
-  train_path: "/home/data/MVImageNet/data_all.h5"
-  val_path: "/home/data/MVImageNet/data_all.h5"
+  enabled: True  # Re-enable with debugging
+  dataset: "mvimagenet"  # Use base MVImageNet class for validation (like Core50 pattern)
+  train_path: "/home/data/MVImageNet/"
+  val_path: "/home/data/MVImageNet/"
+  format: "h5"  # Add format specification
   num_workers: 4
   batch_size: 64  # Aligned with Core50
   k: [10, 20, 50, 100]  # Aligned with Core50
   temperature: 0.07
-  metadata_path: "/home/data/MVImageNet/dataset_val_all3.parquet"
-  time_window: 10
-  val_split: 0.05
-  stratify_by_category: true
-  random_seed: 42
+  # KNN evaluation uses proper train/val split
+  train_metadata_path: "/home/brothen/solo-learn/mvimagenet_train.parquet"  # Use actual train set for KNN training
+  val_metadata_path: "/home/brothen/solo-learn/mvimagenet_val.parquet"  # Use val set for KNN evaluation
+  # KNN frequency settings  
+  perform_on_validation: True  # Run KNN when validation runs (every epoch now)
+  perform_every_n_batches: 5400 # Reduce frequency to avoid memory issues with full train set
+  delay_epochs: 0  # Start KNN evaluation immediately
+  verbose: True  # Show progress bars for KNN evaluation
 
 optimizer:
   name: "lars"
@@ -103,4 +111,4 @@ precision: 32
 
 # Validation settings
 num_sanity_val_steps: 2  # Run 2 validation steps before training (aligned with Core50)
-check_val_every_n_epoch: 5  # Validate every 5 epochs for monitoring 
+check_val_every_n_epoch: 1  # Validate every epoch for more frequent monitoring 

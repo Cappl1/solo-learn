@@ -1,0 +1,41 @@
+- rrc:
+    enabled: False
+  color_jitter:
+    prob: 0.0
+    brightness: 0.0
+    contrast: 0.0
+    saturation: 0.0
+    hue: 0.0
+  grayscale:
+    prob: 0.0
+  gaussian_blur:
+    prob: 0.0
+  solarization:
+    prob: 0.0
+  equalization:
+    prob: 0.0
+  horizontal_flip:
+    prob: 0.0
+  crop_size: 224
+  num_crops: 1
+
+- rrc:
+    enabled: False
+  color_jitter:
+    prob: 0.0
+    brightness: 0.0
+    contrast: 0.0
+    saturation: 0.0
+    hue: 0.0
+  grayscale:
+    prob: 0.0
+  gaussian_blur:
+    prob: 0.0
+  solarization:
+    prob: 0.0
+  equalization:
+    prob: 0.0
+  horizontal_flip:
+    prob: 0.0
+  crop_size: 224
+  num_crops: 1 

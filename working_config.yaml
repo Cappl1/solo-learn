@@ -1,0 +1,63 @@
+defaults:
+  - _self_
+  - wandb: private.yaml
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+# disable hydra outputs
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+name: "difficulty_analysis_mae_exponential_bs64x3_ep20_categories"
+backbone:
+  name: "resnet18"
+pretrained_feature_extractor: "/home/brothen/solo-learn/trained_models/curriculum_mocov3/mae-exponential-bs3x64/mocov3-curriculum-mae-exponential-core50-bs3x64-np6j8ah8-ep=20-stp=13125.ckpt"
+data:
+  dataset: "core50_categories"
+  train_path: "/home/brothen/core50_arr.h5"
+  val_path: "/home/brothen/core50_arr.h5"
+  format: "h5"
+  num_classes: 10
+  num_workers: 4
+  train_backgrounds: ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]  # train sessions
+  val_backgrounds: ["s3", "s7", "s10"]  # test sessions
+  dataset_kwargs:
+    use_categories: True # Enable category-based evaluation
+optimizer:
+  name: "lars"
+  batch_size: 64
+  lr: 0.3
+  weight_decay: 0
+scheduler:
+  name: "warmup_cosine"
+  warmup_start_lr: 0.00001
+  warmup_epochs: 0.0
+  max_epochs: 100
+  interval: "epoch"
+checkpoint:
+  enabled: True
+  dir: "trained_models/linear"
+  frequency: 1
+grid:
+  enabled: False
+early_stopping:
+  monitor: "val/loss"
+  enabled: True
+  patience: 5
+
+pre_extract_feats: False
+finetune: False
+# extra training options
+auto_resume:
+  enabled: False
+max_epochs: 100
+devices: [0]
+sync_batchnorm: True
+accelerator: "gpu"
+strategy: "ddp"
+precision: 32method: curriculum_mocov3
+momentum:
+  base_tau: 0.996
+  final_tau: 0.996

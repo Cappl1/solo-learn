@@ -47,18 +47,17 @@ class KNNCallback(pl.Callback):
                 dataset_kwargs["train_backgrounds"] = train_backgrounds
             if val_backgrounds is not None:
                 dataset_kwargs["val_backgrounds"] = val_backgrounds
-        elif self.cfg.dataset == "temporal_mvimagenet":
-            # For temporal MVImageNet, pass all required parameters
+        elif self.cfg.dataset in ["temporal_mvimagenet", "mvimagenet"]:
+            # For MVImageNet datasets, pass metadata paths
+            if hasattr(self.cfg, "train_metadata_path"):
+                dataset_kwargs["train_metadata_path"] = self.cfg.train_metadata_path
+            if hasattr(self.cfg, "val_metadata_path"):
+                dataset_kwargs["val_metadata_path"] = self.cfg.val_metadata_path
             if hasattr(self.cfg, "metadata_path"):
                 dataset_kwargs["metadata_path"] = self.cfg.metadata_path
-            if hasattr(self.cfg, "time_window"):
+            # Only pass time_window for temporal version
+            if self.cfg.dataset == "temporal_mvimagenet" and hasattr(self.cfg, "time_window"):
                 dataset_kwargs["time_window"] = self.cfg.time_window
-            if hasattr(self.cfg, "val_split"):
-                dataset_kwargs["val_split"] = self.cfg.val_split
-            if hasattr(self.cfg, "stratify_by_category"):
-                dataset_kwargs["stratify_by_category"] = self.cfg.stratify_by_category
-            if hasattr(self.cfg, "random_seed"):
-                dataset_kwargs["random_seed"] = self.cfg.random_seed
 
         train_dataset, val_dataset = prepare_datasets(
             self.cfg.dataset,

@@ -1,6 +1,7 @@
 defaults:
   - _self_
   - wandb: private.yaml
+  - augmentations: none.yaml
   - override hydra/hydra_logging: disabled
   - override hydra/job_logging: disabled
 
@@ -10,6 +11,26 @@ hydra:
   run:
     dir: .
 
+method: "selective_curriculum_mocov3" 
+method_kwargs:
+  proj_hidden_dim: 4096
+  proj_output_dim: 256
+  pred_hidden_dim: 4096
+  temperature: 0.1
+  
+  # Curriculum learning parameters
+  curriculum_type: "jepa"  # MUST be "jepa" for selective approach
+  curriculum_reverse: False
+  curriculum_warmup_epochs: 10
+  curriculum_weight: 1.0
+  reconstruction_masking_ratio: 0.75
+  
+  # Selective curriculum parameters
+  num_candidates: 8  # Number of candidate pairs to evaluate per sample
+  curriculum_only_for_epochs: 100  # U    
+momentum:
+  base_tau: 0.996
+  final_tau: 0.996
 name: "difficulty_analysis_mae_exponential_bs64x3_ep20_categories"
 backbone:
   name: "resnet18"
@@ -27,9 +48,13 @@ data:
     use_categories: True # Enable category-based evaluation
 optimizer:
   name: "lars"
+  classifier_lr: 3e-3
   batch_size: 64
   lr: 0.3
   weight_decay: 0
+  no_labels: False 
+
+   #
 scheduler:
   name: "warmup_cosine"
   warmup_start_lr: 0.00001

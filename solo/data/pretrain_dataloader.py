@@ -37,7 +37,8 @@ from solo.data.custom.tinyimgnet import TinyDataset
 from solo.data.custom.core50 import Core50
 from solo.data.custom.temporal_core50 import TemporalCore50
 from solo.data.custom.selective_temporal_core50 import SelectiveTemporalCore50
-from solo.data.custom.temporal_mvimagnet2 import TemporalMVImageNet
+from solo.data.custom.temporal_mvimagenet import TemporalMVImageNet
+from solo.data.custom.mvimagenet import MVImageNet
 
 try:
     from solo.data.h5_dataset import H5Dataset
@@ -368,10 +369,24 @@ def prepare_datasets(
             train_data_path, transform=transform, **dataset_kwargs
         )
     elif dataset == "temporal_mvimagenet":
-        from solo.data.custom.temporal_mvimagnet2 import TemporalMVImageNet
+        # Handle train/val metadata paths correctly
+        metadata_path = dataset_kwargs.get("metadata_path", dataset_kwargs.get("train_metadata_path"))
+        if metadata_path is None:
+            raise ValueError("temporal_mvimagenet requires metadata_path or train_metadata_path")
+        
+        # Clean up kwargs for the dataset - remove ALL metadata path variants
+        clean_kwargs = {k: v for k, v in dataset_kwargs.items() 
+                       if k not in ["train_metadata_path", "val_metadata_path", "metadata_path"]}
         
         train_dataset = dataset_with_index(TemporalMVImageNet)(
-            h5_path=train_data_path,
+            h5_data_dir=train_data_path,
+            metadata_path=metadata_path,
+            transform=transform,
+            **clean_kwargs
+        )
+    elif dataset == "mvimagenet":
+        train_dataset = dataset_with_index(MVImageNet)(
+            h5_data_dir=train_data_path,
             transform=transform,
             **dataset_kwargs
         )

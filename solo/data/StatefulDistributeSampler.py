@@ -58,59 +58,48 @@ class DataPrepIterCheck(pl.LightningDataModule):
             **train_kwargs
         )
 
-        # For temporal_mvimagenet, also create validation dataset for monitoring
-        if self.cfg.data.dataset == "temporal_mvimagenet":
-            self.val_dataset = self._create_mvimagenet_val_dataset(transform)
+        # For temporal_mvimagenet, don't create val_dataset in setup - we'll create it directly in val_dataloader()
+        # using the base MVImageNet class to avoid temporal complexity in validation
 
-    def _create_mvimagenet_val_dataset(self, transform):
-        """Create validation dataset for temporal_mvimagenet with balanced class distribution."""
-        from solo.data.custom.temporal_mvimagnet2 import TemporalMVImageNet
-        
-        # Extract dataset-specific kwargs
-        dataset_kwargs = self.cfg.data.dataset_kwargs.copy() if hasattr(self.cfg.data, 'dataset_kwargs') else {}
-        metadata_path = dataset_kwargs.get("metadata_path", "/home/data/MVImageNet/dataset_val_all3.parquet")
-        time_window = dataset_kwargs.get("time_window", 15)
-        val_split = dataset_kwargs.get("val_split", 0.05)
-        stratify_by_category = dataset_kwargs.get("stratify_by_category", True)
-        random_seed = dataset_kwargs.get("random_seed", 42)
-        
-        # Create validation dataset from the same source as training
-        val_dataset = TemporalMVImageNet(
-            h5_path=self.cfg.data.train_path,
-            metadata_path=metadata_path,
-            transform=transform,
-            time_window=time_window,
-            split='val',
-            val_split=val_split,
-            stratify_by_category=stratify_by_category,
-            random_seed=random_seed,
-        )
-        
-        # Wrap with index for consistency
-        from solo.data.pretrain_dataloader import dataset_with_index
-        return dataset_with_index(type(val_dataset))(
-            h5_path=self.cfg.data.train_path,
-            metadata_path=metadata_path,
-            transform=transform,
-            time_window=time_window,
-            split='val',
-            val_split=val_split,
-            stratify_by_category=stratify_by_category,
-            random_seed=random_seed,
-        )
+
 
     def val_dataloader(self):
         if self.cfg.data.dataset == "custom" and (self.cfg.data.no_labels or self.cfg.data.val_path is None):
             val_loader = None
         elif self.cfg.data.dataset in ["imagenet100", "imagenet", "ego4d"] and self.cfg.data.val_path is None:
             val_loader = None
-        elif self.cfg.data.dataset == "temporal_mvimagenet" and hasattr(self, 'val_dataset'):
-            # Use the validation split created in setup
+        elif self.cfg.data.dataset == "temporal_mvimagenet" and self.cfg.data.val_path is not None:
+            # For temporal_mvimagenet, use base MVImageNet for validation (single images, no temporal pairing)
+            from solo.data.custom.mvimagenet import MVImageNet
+            from torchvision import transforms
+            
+            # Create a basic transform for validation
+            val_transform = transforms.Compose([
+                transforms.Resize(224),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], 
+                    std=[0.229, 0.224, 0.225]
+                )
+            ])
+            
+            # Create base MVImageNet dataset for validation (no temporal complexity)
+            val_dataset = MVImageNet(
+                h5_data_dir=self.cfg.data.val_path,
+                transform=val_transform,
+                split='val',
+                train_metadata_path=self.cfg.data.dataset_kwargs.get("train_metadata_path"),
+                val_metadata_path=self.cfg.data.dataset_kwargs.get("val_metadata_path")
+            )
+            
+            # Create dataloader
+            from torch.utils.data import DataLoader
             from torch.utils.data.distributed import DistributedSampler
             
-            sampler = DistributedSampler(self.val_dataset, shuffle=False)
+            sampler = DistributedSampler(val_dataset, shuffle=False)
             val_loader = DataLoader(
-                self.val_dataset,
+                val_dataset,
                 batch_size=self.cfg.optimizer.batch_size,
                 num_workers=self.cfg.data.num_workers,
                 pin_memory=True,
@@ -165,17 +154,11 @@ class DataPrepIterCheck(pl.LightningDataModule):
                 sampler=sampler,
             )
         else:
-            val_data_format = self.cfg.data.format
-            _, val_loader = prepare_data_classification(
-                self.cfg.data.dataset,
-                train_data_path=self.cfg.data.train_path,
-                val_data_path=self.cfg.data.val_path,
-                data_format=val_data_format,
+            val_loader = prepare_dataloader(
+                self.val_dataset,
                 batch_size=self.cfg.optimizer.batch_size,
                 num_workers=self.cfg.data.num_workers,
-                samplers="distributed"
             )
-
         return val_loader
 
     def train_dataloader(self):

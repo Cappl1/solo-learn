@@ -172,4 +172,12 @@ dmypy.json
 # vim
 *.sw?
 
+# Large data files
+*.parquet
+optimized_mvimagenet_train.parquet
+mvimagenet_master.parquet
+mvimagenet_usable.parquet
+mvimagenet_train.parquet
+mvimagenet_val.parquet
+
 # End of https://www.gitignore.io/api/python,visualstudiocode

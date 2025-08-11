@@ -1,0 +1,47 @@
+defaults:
+  - _self_
+method: curriculum_mocov3
+name: test_difficulty_analysis
+backbone:
+  name: resnet18
+momentum:
+  base_tau: 0.996
+  final_tau: 0.996
+method_kwargs:
+  proj_hidden_dim: 4096
+  proj_output_dim: 256
+  pred_hidden_dim: 4096
+  temperature: 0.1
+data:
+  dataset: core50_categories
+  train_path: /home/brothen/core50_arr.h5
+  val_path: /home/brothen/core50_arr.h5
+  format: h5
+  num_classes: 10
+  num_workers: 4
+  num_large_crops: 2
+  num_small_crops: 0
+  train_backgrounds: [s1, s2, s4, s5, s6, s8, s9, s11]
+  val_backgrounds: [s3, s7, s10]
+  dataset_kwargs:
+    use_categories: true
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 0.01
+  warmup_start_lr: 0.0
+  eta_min: 0.0
+  max_epochs: 100
+  interval: step
+  frequency: 1
+  lr_decay_steps: null
+  min_lr: 0.0
+optimizer:
+  name: lars
+  batch_size: 64
+  lr: 1.6
+  weight_decay: 0.000001
+max_epochs: 100
+devices: [0]
+accelerator: gpu
+precision: 32
+no_validation: true

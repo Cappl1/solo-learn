@@ -50,7 +50,8 @@ _N_CLASSES_PER_DATASET = {
     "toybox": 348,
     'core50_bg': 11,
     'COIL100': 100,
-    "temporal_mvimagenet": 238 # MVImageNet has 1000 object categories
+    "temporal_mvimagenet": 238, # MVImageNet has 1000 object categories
+    "mvimagenet": 238,  # MVImageNet has 238 categories (using same as temporal version)
 }
 
 _SUPPORTED_DATASETS = [
@@ -88,7 +89,8 @@ _SUPPORTED_DATASETS = [
     "STL10_FG_224",
     "STL10_FG",
     "tiny",
-    "temporal_mvimagenet"
+    "temporal_mvimagenet",
+    "mvimagenet"
 ]
 
 

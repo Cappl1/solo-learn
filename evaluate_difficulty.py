@@ -491,6 +491,57 @@ class DifficultyEvaluator:
             difficulty = 1.0 - margin  # Lower margin = higher difficulty
         return difficulty.cpu()
     
+    def compute_pixel_entropy_difficulty(self, images):
+        """Compute difficulty based on pixel-level entropy."""
+        with torch.no_grad():
+            # Convert images to numpy for processing
+            if isinstance(images, torch.Tensor):
+                # Assuming images are normalized, denormalize them first
+                # Typical ImageNet normalization: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                images_np = images.cpu().numpy()
+                
+                # Denormalize
+                mean = np.array([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1)
+                std = np.array([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1)
+                images_np = images_np * std + mean
+                
+                # Clip to [0, 1] and convert to [0, 255]
+                images_np = np.clip(images_np, 0, 1) * 255
+                images_np = images_np.astype(np.uint8)
+            else:
+                images_np = images
+            
+            difficulties = []
+            
+            for i in range(images_np.shape[0]):
+                img = images_np[i]  # Shape: (C, H, W)
+                
+                # Convert to grayscale for entropy computation
+                if len(img.shape) == 3 and img.shape[0] == 3:
+                    # RGB to grayscale: 0.299*R + 0.587*G + 0.114*B
+                    img_gray = (0.299 * img[0] + 0.587 * img[1] + 0.114 * img[2]).astype(np.uint8)
+                else:
+                    img_gray = img[0] if len(img.shape) == 3 else img
+                
+                # Compute histogram of pixel intensities
+                hist, _ = np.histogram(img_gray.flatten(), bins=256, range=(0, 256), density=True)
+                
+                # Remove zero probabilities to avoid log(0)
+                hist = hist[hist > 0]
+                
+                # Compute entropy
+                if len(hist) > 1:
+                    entropy = -np.sum(hist * np.log2(hist))
+                    # Normalize by maximum possible entropy (log2(256) = 8)
+                    max_entropy = 8.0
+                    normalized_entropy = entropy / max_entropy
+                else:
+                    normalized_entropy = 0.0  # Constant image has no entropy
+                
+                difficulties.append(normalized_entropy)
+            
+            return torch.tensor(difficulties, dtype=torch.float32)
+    
     def evaluate_dataset(self, dataloader, max_batches=None):
         """Evaluate the entire dataset using actual temporal pairs."""
         print(f"Evaluating with {self.difficulty_method} difficulty method using actual temporal pairs...")
@@ -585,6 +636,8 @@ class DifficultyEvaluator:
                 difficulties = self.compute_entropy_difficulty(logits)
             elif self.difficulty_method == 'margin':
                 difficulties = self.compute_margin_difficulty(logits)
+            elif self.difficulty_method == 'pixel_entropy':
+                difficulties = self.compute_pixel_entropy_difficulty(img1)
             
             # Compute correctness
             correct = (predictions == targets).cpu().numpy()
@@ -990,7 +1043,7 @@ def main():
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Number of data loading workers')
     parser.add_argument('--difficulty_method', type=str, default='reconstruction',
-                        choices=['reconstruction', 'entropy', 'margin'],
+                        choices=['reconstruction', 'entropy', 'margin', 'pixel_entropy'],
                         help='Method to compute difficulty')
     parser.add_argument('--max_batches', type=int, default=None,
                         help='Maximum number of batches to evaluate (for debugging)')

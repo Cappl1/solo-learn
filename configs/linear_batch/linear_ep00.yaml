@@ -1,0 +1,67 @@
+accelerator: gpu
+auto_resume:
+  enabled: false
+backbone:
+  name: resnet18
+checkpoint:
+  dir: trained_models/linear/simclr_baseline/selective_curriculum_mocov3_t60_ep00
+  enabled: true
+  frequency: 1
+data:
+  dataset: core50
+  dataset_kwargs:
+    use_categories: false
+  format: h5
+  num_classes: 50
+  num_workers: 4
+  train_backgrounds:
+  - s1
+  - s2
+  - s4
+  - s5
+  - s6
+  - s8
+  - s9
+  - s11
+  train_path: /home/brothen/core50_arr.h5
+  val_backgrounds:
+  - s3
+  - s7
+  - s10
+  val_path: /home/brothen/core50_arr.h5
+defaults:
+- _self_
+- wandb: private.yaml
+- override hydra/hydra_logging: disabled
+- override hydra/job_logging: disabled
+devices:
+- 0
+early_stopping:
+  enabled: true
+  monitor: val/loss
+  patience: 5
+finetune: false
+grid:
+  enabled: false
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+max_epochs: 100
+name: selective_curriculum_mocov3_t60_ep00
+optimizer:
+  batch_size: 64
+  lr: 0.3
+  name: lars
+  weight_decay: 0
+pre_extract_feats: false
+precision: 32
+pretrained_feature_extractor: /home/brothen/solo-learn/trained_models/predify_simclr/a8ylecmc/predify-simclr-temporal-no-aug-no-pcoder-grads-a8ylecmc-ep=0-stp=0.ckpt
+scheduler:
+  interval: epoch
+  max_epochs: 100
+  name: warmup_cosine
+  warmup_epochs: 0.0
+  warmup_start_lr: 1.0e-05
+strategy: ddp
+sync_batchnorm: true

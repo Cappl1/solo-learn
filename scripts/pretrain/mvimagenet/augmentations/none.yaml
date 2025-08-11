@@ -1,5 +1,7 @@
 - rrc:
-    enabled: False
+    enabled: True
+    crop_min_scale: 0.8
+    crop_max_scale: 1.0
   color_jitter:
     prob: 0.0
     brightness: 0.0
@@ -20,7 +22,9 @@
   num_crops: 1
 
 - rrc:
-    enabled: False
+    enabled: True
+    crop_min_scale: 0.8
+    crop_max_scale: 1.0
   color_jitter:
     prob: 0.0
     brightness: 0.0

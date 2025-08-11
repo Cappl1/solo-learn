@@ -35,6 +35,7 @@ from solo.data.custom.imagenet import ImgnetDataset, ImgNetDataset_42, ImageNetS
 from solo.data.custom.base import H5ClassificationDataset
 from solo.data.custom.core50 import Core50, Core50ForBGClassification
 from solo.data.custom.tinyimgnet import TinyDataset
+from solo.data.custom.mvimagenet import MVImageNet
 
 try:
     from solo.data.h5_dataset import H5Dataset
@@ -301,6 +302,7 @@ def prepare_transforms(dataset: str) -> Tuple[nn.Module, nn.Module]:
         'selective_temporal_core50': imagenet_pipeline, # use same pipeline as temporal_core50
         'core50_categories': core50_pipeline, # Added entry for category evaluation
         'temporal_mvimagenet': imagenet_pipeline,  # Add temporal MVImageNet pipeline
+        'mvimagenet': imagenet_pipeline,  # Add simple MVImageNet pipeline
         "custom": custom_pipeline,
         'DTD': imagenet_pipeline,
         'Flowers102': imagenet_pipeline,
@@ -374,7 +376,7 @@ def prepare_datasets(
     assert dataset in [
         "cifar10", "cifar100", "stl10", "imagenet", "imagenet100", "custom", "imagenet2", "imagenet2_100", "ego4d",
         "tiny", "cifar10_224", "cifar100_224", "imagenet_42", "imagenet100_42", 'core50','temporal_core50', 
-        'selective_temporal_core50', "core50_categories", "temporal_mvimagenet", "DTD", 'Flowers102', 'FGVCAircraft', 'Food101', 'OxfordIIITPet', 'Places365',
+        'selective_temporal_core50', "core50_categories", "temporal_mvimagenet", "mvimagenet", "DTD", 'Flowers102', 'FGVCAircraft', 'Food101', 'OxfordIIITPet', 'Places365',
         'StanfordCars', "STL10","STL10_224", "Places365_h5", "SUN397", "Caltech101", "imagenet1pct_42", 
         "imagenet10pct_42", "toybox", 'core50_bg', "feat", "COIL100", "STL10_FG_224", "STL10_FG"
     ]
@@ -486,6 +488,42 @@ def prepare_datasets(
         val_dataset = Core50(h5_path=val_data_path, transform=T_val,
                           backgrounds=val_bgs,
                           use_categories=use_cats)
+    elif dataset == "temporal_mvimagenet":
+        from solo.data.custom.temporal_mvimagenet import TemporalMVImageNet
+        
+        # Extract metadata paths
+        train_metadata = dataset_kwargs.get("metadata_path", dataset_kwargs.get("train_metadata_path"))
+        val_metadata = dataset_kwargs.get("val_metadata_path", train_metadata)
+        
+        if train_metadata is None:
+            raise ValueError(f"temporal_mvimagenet requires metadata_path or train_metadata_path. Got dataset_kwargs: {list(dataset_kwargs.keys())}")
+        
+        # Clean dataset kwargs
+        clean_kwargs = {k: v for k, v in dataset_kwargs.items() 
+                       if k not in ["train_metadata_path", "val_metadata_path", "metadata_path"]}
+        
+        # Create simple transform wrapper for temporal pairs
+        class SingleImageTransform:
+            def __init__(self, transform):
+                self.transform = transform
+            
+            def __call__(self, img, paired_img=None):
+                # Only transform the first image for classification
+                return self.transform(img)
+        
+        train_dataset = TemporalMVImageNet(
+            h5_data_dir=train_data_path,
+            metadata_path=train_metadata,
+            transform=SingleImageTransform(T_train),
+            **clean_kwargs
+        )
+        
+        val_dataset = TemporalMVImageNet(
+            h5_data_dir=val_data_path,
+            metadata_path=val_metadata,
+            transform=SingleImageTransform(T_val),
+            **clean_kwargs
+        )
     elif dataset == "selective_temporal_core50":
         # Special handling for selective curriculum dataset with validation mode
         from solo.data.custom.selective_temporal_core50 import SelectiveTemporalCore50
@@ -526,7 +564,7 @@ def prepare_datasets(
         val_dataset = ImageNetS(Path(val_data_path) / 'ImageNet-S/ImageNetS919/validation', transform=T_val, mode=mode)
     elif dataset == "temporal_mvimagenet":
         # Special handling for temporal MVImageNet dataset
-        from solo.data.custom.temporal_mvimagnet2 import TemporalMVImageNet
+        from solo.data.custom.temporal_mvimagenet import TemporalMVImageNet
         
         train_dataset = TemporalMVImageNet(
             h5_path=train_data_path,
@@ -548,6 +586,29 @@ def prepare_datasets(
             val_split=dataset_kwargs.get("val_split", 0.05),
             stratify_by_category=dataset_kwargs.get("stratify_by_category", True),
             random_seed=dataset_kwargs.get("random_seed", 42)
+        )
+    elif dataset == "mvimagenet":
+        # Simple MVImageNet dataset (non-temporal)
+        use_cats = dataset_kwargs.get("use_categories", False)
+        
+        # Filter out parameters that are not valid for MVImageNet
+        mvimagenet_kwargs = {k: v for k, v in dataset_kwargs.items() 
+                           if k not in ['use_categories', 'train_backgrounds', 'val_backgrounds']}
+        
+        train_dataset = MVImageNet(
+            h5_data_dir=train_data_path,
+            transform=T_train,
+            split='train',
+            use_categories=use_cats,
+            **mvimagenet_kwargs
+        )
+        
+        val_dataset = MVImageNet(
+            h5_data_dir=val_data_path,
+            transform=T_val,
+            split='val',
+            use_categories=use_cats,
+            **mvimagenet_kwargs
         )
     if data_fraction > 0:
         assert data_fraction < 1, "Only use data_fraction for values smaller than 1."

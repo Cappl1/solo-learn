@@ -1,0 +1,61 @@
+defaults:
+  - _self_
+  - wandb: private.yaml
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+# disable hydra outputs
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+name: "predify_simclr__error_grads_only_epoch1_step5400"
+backbone:
+  name: "vgg16"
+pretrained_feature_extractor: "/home/brothen/solo-learn/trained_models/predify_simclr/error_back_prop_mvimagenet/predify-simclr-temporal-mvimagenet-separate-splits-ijhzxrjw-ep=1-stp=5400.ckpt"
+data:
+  dataset: mvimagenet
+  train_path: "/home/data/MVImageNet/"
+  val_path: "/home/data/MVImageNet/"  # Same directory for both train/val
+  format: "h5"
+  num_workers: 4
+  dataset_kwargs:
+    # Train dataset uses train parquet file
+    train_metadata_path: "/home/brothen/solo-learn/mvimagenet_train.parquet"
+    # Val dataset uses val parquet file
+    val_metadata_path: "/home/brothen/solo-learn/mvimagenet_val.parquet"
+    
+optimizer:
+  name: "lars"
+  batch_size: 64
+  lr: 0.3
+  weight_decay: 0
+scheduler:
+  name: "warmup_cosine"
+  warmup_start_lr: 0.00001
+  warmup_epochs: 0.0
+  max_epochs: 100
+  interval: "epoch"
+checkpoint:
+  enabled: True
+  dir: "trained_models/linear_probe/mvimagenet"
+  frequency: 1
+grid:
+  enabled: False
+early_stopping:
+  monitor: "val/loss"
+  enabled: True
+  patience: 5
+
+pre_extract_feats: False
+finetune: False
+# extra training options
+auto_resume:
+  enabled: False
+max_epochs: 100
+devices: [0]
+sync_batchnorm: True
+accelerator: "gpu"
+strategy: "ddp"
+precision: 32

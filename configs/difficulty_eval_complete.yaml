@@ -1,0 +1,114 @@
+accelerator: gpu
+accumulate_grad_batches: 1
+augmentations: []
+auto_lr_find: false
+auto_resume: false
+backbone:
+  kwargs: {}
+  name: resnet18
+callbacks: null
+check_val_every_n_epoch: 1
+data:
+  brightness: 0.4
+  color_jitter_prob: 0.8
+  contrast: 0.4
+  crop_size: 224
+  dataset: core50_categories
+  dataset_kwargs:
+    use_categories: true
+  format: h5
+  gaussian_prob: 1.0
+  gray_scale_prob: 0.2
+  horizontal_flip_prob: 0.5
+  hue: 0.1
+  max_scale: 1.0
+  min_scale: 0.08
+  num_classes: 10
+  num_large_crops: 2
+  num_small_crops: 0
+  num_workers: 4
+  saturation: 0.2
+  solarization_prob: 0.0
+  train_backgrounds:
+  - s1
+  - s2
+  - s4
+  - s5
+  - s6
+  - s8
+  - s9
+  - s11
+  train_path: /home/brothen/core50_arr.h5
+  val_backgrounds:
+  - s3
+  - s7
+  - s10
+  val_path: /home/brothen/core50_arr.h5
+defaults:
+- _self_
+devices:
+- 0
+enable_checkpointing: false
+fast_dev_run: false
+limit_predict_batches: 1.0
+limit_test_batches: 1.0
+limit_train_batches: 1.0
+limit_val_batches: 1.0
+log_every_n_steps: 50
+logger: false
+loss:
+  name: mocov3
+  temperature: 0.1
+max_epochs: 100
+method: selective_curriculum_mocov3
+method_kwargs:
+  base_tau_momentum: 0.996
+  curriculum_only_for_epochs: 100
+  curriculum_reverse: false
+  curriculum_type: jepa
+  curriculum_warmup_epochs: 20
+  curriculum_weight: 1.0
+  final_tau_momentum: 0.996
+  num_candidates: 8
+  pred_hidden_dim: 4096
+  proj_hidden_dim: 4096
+  proj_output_dim: 256
+  reconstruction_masking_ratio: 0.75
+  selection_epochs: 100
+  temperature: 0.1
+momentum:
+  base_tau: 0.996
+  final_tau: 0.996
+name: difficulty_analysis_selective_curriculum
+no_validation: false
+num_sanity_val_steps: 0
+optimizer:
+  batch_size: 64
+  classifier_lr: 0.3
+  eta: 0.02
+  exclude_bias_n_norm: false
+  grad_clip_lars: false
+  lr: 1.6
+  momentum: 0.9
+  name: lars
+  weight_decay: 1.0e-06
+overfit_batches: 0.0
+precision: 32
+resume_from_checkpoint: null
+scheduler:
+  eta_min: 0.0
+  frequency: 1
+  gamma: 0.1
+  interval: step
+  lr_decay_steps: null
+  max_epochs: 100
+  min_lr: 0.0
+  name: warmup_cosine
+  step_size: 30
+  warmup_epochs: 0.01
+  warmup_start_lr: 0.0
+strategy: auto
+sync_batchnorm: true
+track_grad_norm: -1
+transform_kwargs: {}
+val_check_interval: 1.0

@@ -147,18 +147,25 @@ def main(cfg: DictConfig):
     if cfg.data.get('dataset_kwargs') is not None and 'use_categories' in cfg.data.dataset_kwargs:
         use_categories = cfg.data.dataset_kwargs.use_categories
 
-    train_loader, val_loader = prepare_data(
-        cfg.data.dataset,
-        train_data_path=cfg.data.train_path,
-        val_data_path=cfg.data.val_path,
-        data_format=val_data_format,
-        batch_size=cfg.optimizer.batch_size,
-        num_workers=cfg.data.num_workers,
-        auto_augment=cfg.auto_augment,
-        train_backgrounds=cfg.data.train_backgrounds,
-        val_backgrounds=cfg.data.val_backgrounds,
-        use_categories=use_categories  # Pass directly as an argument
-    )
+    # Prepare arguments for prepare_data, only include train_backgrounds and val_backgrounds if they exist
+    prepare_data_kwargs = {
+        "dataset": cfg.data.dataset,
+        "train_data_path": cfg.data.train_path,
+        "val_data_path": cfg.data.val_path,
+        "data_format": val_data_format,
+        "batch_size": cfg.optimizer.batch_size,
+        "num_workers": cfg.data.num_workers,
+        "auto_augment": cfg.auto_augment,
+        "use_categories": use_categories
+    }
+    
+    # Only add train_backgrounds and val_backgrounds if they exist in the config
+    if hasattr(cfg.data, 'train_backgrounds') and cfg.data.train_backgrounds is not None:
+        prepare_data_kwargs["train_backgrounds"] = cfg.data.train_backgrounds
+    if hasattr(cfg.data, 'val_backgrounds') and cfg.data.val_backgrounds is not None:
+        prepare_data_kwargs["val_backgrounds"] = cfg.data.val_backgrounds
+
+    train_loader, val_loader = prepare_data(**prepare_data_kwargs)
 
     if cfg.data.format == "dali":
         assert (
